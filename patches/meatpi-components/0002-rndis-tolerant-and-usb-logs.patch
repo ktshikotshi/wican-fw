@@ -1,0 +1,96 @@
+diff --git a/components/cherryusb/class/wireless/usbh_rndis.c b/components/cherryusb/class/wireless/usbh_rndis.c
+index 4bcb5df..9b6914d 100644
+--- a/components/cherryusb/class/wireless/usbh_rndis.c
++++ b/components/cherryusb/class/wireless/usbh_rndis.c
+@@ -371,19 +371,28 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+             case OID_GEN_PHYSICAL_MEDIUM:
+                 ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_PHYSICAL_MEDIUM, 4, data, &data_len);
+                 if (ret < 0) {
+-                    goto query_errorout;
++                    /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
++                    USB_LOG_WRN("rndis query OID_GEN_PHYSICAL_MEDIUM failed (%d), continuing\r\n", ret);
++                    ret = 0;
++                    break;
+                 }
+                 break;
+             case OID_GEN_MAXIMUM_FRAME_SIZE:
+                 ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MAXIMUM_FRAME_SIZE, 4, data, &data_len);
+                 if (ret < 0) {
+-                    goto query_errorout;
++                    /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
++                    USB_LOG_WRN("rndis query OID_GEN_MAXIMUM_FRAME_SIZE failed (%d), continuing\r\n", ret);
++                    ret = 0;
++                    break;
+                 }
+                 break;
+             case OID_GEN_LINK_SPEED:
+                 ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_LINK_SPEED, 4, data, &data_len);
+                 if (ret < 0) {
+-                    goto query_errorout;
++                    /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
++                    USB_LOG_WRN("rndis query OID_GEN_LINK_SPEED failed (%d), continuing\r\n", ret);
++                    ret = 0;
++                    break;
+                 }
+ 
+                 memcpy(&rndis_class->link_speed, data, 4);
+@@ -391,7 +400,10 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+             case OID_GEN_MEDIA_CONNECT_STATUS:
+                 ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MEDIA_CONNECT_STATUS, 4, data, &data_len);
+                 if (ret < 0) {
+-                    goto query_errorout;
++                    /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
++                    USB_LOG_WRN("rndis query OID_GEN_MEDIA_CONNECT_STATUS failed (%d), continuing\r\n", ret);
++                    ret = 0;
++                    break;
+                 }
+                 if (NDIS_MEDIA_STATE_CONNECTED == data[0]) {
+                     rndis_class->connect_status = true;
+@@ -402,7 +414,10 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+             case OID_802_3_MAXIMUM_LIST_SIZE:
+                 ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_MAXIMUM_LIST_SIZE, 4, data, &data_len);
+                 if (ret < 0) {
+-                    goto query_errorout;
++                    /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
++                    USB_LOG_WRN("rndis query OID_802_3_MAXIMUM_LIST_SIZE failed (%d), continuing\r\n", ret);
++                    ret = 0;
++                    break;
+                 }
+                 break;
+             case OID_802_3_CURRENT_ADDRESS:
+@@ -435,7 +450,9 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+     uint8_t multicast_list[6] = { 0x01, 0x00, 0x5E, 0x00, 0x00, 0x01 };
+     ret = usbh_rndis_set_msg_transfer(rndis_class, OID_802_3_MULTICAST_LIST, multicast_list, 6);
+     if (ret < 0) {
+-        return ret;
++        /* fork: Linux rndis_host never sets this; a refusal is not fatal */
++        USB_LOG_WRN("rndis set OID_802_3_MULTICAST_LIST failed (%d), continuing\r\n", ret);
++        ret = 0;
+     }
+ 
+     USB_LOG_INFO("rndis MAC address %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+diff --git a/components/cherryusb/osal/idf/usb_config.h b/components/cherryusb/osal/idf/usb_config.h
+index 3a59cef..8a2dd65 100644
+--- a/components/cherryusb/osal/idf/usb_config.h
++++ b/components/cherryusb/osal/idf/usb_config.h
+@@ -12,7 +12,19 @@
+ 
+ /* ================ USB common Configuration ================ */
+ 
+-#define CONFIG_USB_PRINTF(...) esp_rom_printf(__VA_ARGS__)
++/* fork: route CherryUSB logs through esp_log so the web UI log (and its
++ * file/ws sinks) shows enumeration and class-driver errors; esp_rom_printf
++ * only reached the UART, which a USB-host user cannot watch. */
++#include "esp_log.h"
++#include "freertos/FreeRTOS.h"
++#define CONFIG_USB_PRINTF(...)                                         \
++    do {                                                               \
++        if (xPortInIsrContext()) {                                     \
++            esp_rom_printf(__VA_ARGS__);                               \
++        } else {                                                       \
++            esp_log_write(ESP_LOG_INFO, "cherryusb", __VA_ARGS__);     \
++        }                                                              \
++    } while (0)
+ 
+ #ifndef CONFIG_USB_DBG_LEVEL
+ /* USB_DBG_INFO: the temporary bring-up USB_DBG_LOG level printed per
