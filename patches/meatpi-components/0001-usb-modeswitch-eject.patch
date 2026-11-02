@@ -1,5 +1,14 @@
+From ce40e902067e0aed12991d70cfab6b18300aeff1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 2 Nov 2026 20:45:55 +0000
+Subject: [PATCH 1/2] usb_eth_host: modeswitch LTE sticks stuck in CD-ROM mode
+
+---
+ components/usb_eth_host/usb_eth_host_device.c | 101 ++++++++++++++++++
+ 1 file changed, 101 insertions(+)
+
 diff --git a/components/usb_eth_host/usb_eth_host_device.c b/components/usb_eth_host/usb_eth_host_device.c
-index e663fd7..7f5e5b4 100644
+index e663fd7..7474bca 100644
 --- a/components/usb_eth_host/usb_eth_host_device.c
 +++ b/components/usb_eth_host/usb_eth_host_device.c
 @@ -39,6 +39,103 @@
@@ -7,7 +16,7 @@ index e663fd7..7f5e5b4 100644
  static const char *TAG = "usb_eth_host";
  
 +/*
-+ * USB mode switch (fork addition, 2026-11-02): many LTE sticks enumerate
++ * USB mode switch: many LTE sticks enumerate
 + * first as a fake CD-ROM (mass storage) and only expose their network
 + * interface after the host sends a SCSI command. Linux does this with
 + * usb_modeswitch; WiCAN had no equivalent, so such sticks stayed a dead
@@ -117,3 +126,6 @@ index e663fd7..7f5e5b4 100644
      d.vid = hport->device_desc.idVendor;
      d.pid = hport->device_desc.idProduct;
      d.dev_class = hport->device_desc.bDeviceClass;
+-- 
+2.43.0
+
