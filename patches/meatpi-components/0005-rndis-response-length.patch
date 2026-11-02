@@ -1,0 +1,126 @@
+diff --git a/components/cherryusb/class/wireless/usbh_rndis.c b/components/cherryusb/class/wireless/usbh_rndis.c
+index a1ca6cc..c8ecc3a 100644
+--- a/components/cherryusb/class/wireless/usbh_rndis.c
++++ b/components/cherryusb/class/wireless/usbh_rndis.c
+@@ -75,7 +75,10 @@ static int usbh_rndis_get_response(struct usbh_rndis *rndis_class, uint8_t *resp
+         setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
+         setup->wValue = 0;
+         setup->wIndex = 0;
+-        setup->wLength = sizeof(g_rndis_buf);
++        /* fork: g_rndis_buf is a pointer in this tree (shared eth pool),
++         * so sizeof() gave wLength = 4 and every response was cut to 4
++         * bytes; the stick then times out / STALLs the next read. */
++        setup->wLength = USBH_ETH_SHARED_CTRL_SIZE;
+ 
+         ret = usbh_control_transfer(rndis_class->hport, setup, resp);
+         if (ret != -USB_ERR_TIMEOUT) {
+@@ -168,6 +171,7 @@ static int usbh_rndis_init_msg_transfer(struct usbh_rndis *rndis_class)
+     return ret;
+ }
+ 
++/* fork: *info_len is in/out: buffer size in, bytes copied out */
+ int usbh_rndis_query_msg_transfer(struct usbh_rndis *rndis_class, uint32_t oid, uint32_t query_len, uint8_t *info, uint32_t *info_len)
+ {
+     struct usb_setup_packet *setup;
+@@ -212,8 +216,18 @@ int usbh_rndis_query_msg_transfer(struct usbh_rndis *rndis_class, uint32_t oid,
+         return ret;
+     }
+ 
+-    memcpy(info, ((uint8_t *)resp + sizeof(rndis_query_cmplt_t)), resp->InformationBufferLength);
+-    *info_len = resp->InformationBufferLength;
++    /* fork: bound the copy by what was received and by the caller's
++     * buffer (info_max) instead of trusting the device's length */
++    uint32_t avail = ((uint32_t)ret > sizeof(rndis_query_cmplt_t)) ? ((uint32_t)ret - sizeof(rndis_query_cmplt_t)) : 0;
++    uint32_t n = resp->InformationBufferLength;
++    if (n > avail) {
++        n = avail;
++    }
++    if (n > *info_len) {
++        n = *info_len;
++    }
++    memcpy(info, ((uint8_t *)resp + sizeof(rndis_query_cmplt_t)), n);
++    *info_len = n;
+ 
+     return ret;
+ }
+@@ -276,7 +290,7 @@ int usbh_rndis_get_connect_status(struct usbh_rndis *rndis_class)
+         return -USB_ERR_NOTCONN;
+     }
+ 
+-    ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MEDIA_CONNECT_STATUS, 4, data, &data_len);
++    ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MEDIA_CONNECT_STATUS, 4, data, (data_len = sizeof(data), &data_len));
+     if (ret < 0) {
+         return ret;
+     }
+@@ -383,7 +397,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+         return ret;
+     }
+ 
+-    ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_SUPPORTED_LIST, 0, tmp_buffer, &data_len);
++    ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_SUPPORTED_LIST, 0, tmp_buffer, (data_len = sizeof(tmp_buffer), &data_len));
+     if (ret < 0) {
+         return ret;
+     }
+@@ -396,7 +410,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+         oid = oid_support_list[i];
+         switch (oid) {
+             case OID_GEN_PHYSICAL_MEDIUM:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_PHYSICAL_MEDIUM, 4, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_PHYSICAL_MEDIUM, 4, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
+                     USB_LOG_WRN("rndis query OID_GEN_PHYSICAL_MEDIUM failed (%d), continuing\r\n", ret);
+@@ -405,7 +419,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 }
+                 break;
+             case OID_GEN_MAXIMUM_FRAME_SIZE:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MAXIMUM_FRAME_SIZE, 4, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MAXIMUM_FRAME_SIZE, 4, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
+                     USB_LOG_WRN("rndis query OID_GEN_MAXIMUM_FRAME_SIZE failed (%d), continuing\r\n", ret);
+@@ -414,7 +428,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 }
+                 break;
+             case OID_GEN_LINK_SPEED:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_LINK_SPEED, 4, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_LINK_SPEED, 4, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
+                     USB_LOG_WRN("rndis query OID_GEN_LINK_SPEED failed (%d), continuing\r\n", ret);
+@@ -425,7 +439,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 memcpy(&rndis_class->link_speed, data, 4);
+                 break;
+             case OID_GEN_MEDIA_CONNECT_STATUS:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MEDIA_CONNECT_STATUS, 4, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_GEN_MEDIA_CONNECT_STATUS, 4, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
+                     USB_LOG_WRN("rndis query OID_GEN_MEDIA_CONNECT_STATUS failed (%d), continuing\r\n", ret);
+@@ -439,7 +453,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 }
+                 break;
+             case OID_802_3_MAXIMUM_LIST_SIZE:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_MAXIMUM_LIST_SIZE, 4, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_MAXIMUM_LIST_SIZE, 4, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     /* fork: optional OID, some sticks (Alcatel IK40) refuse it */
+                     USB_LOG_WRN("rndis query OID_802_3_MAXIMUM_LIST_SIZE failed (%d), continuing\r\n", ret);
+@@ -448,7 +462,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 }
+                 break;
+             case OID_802_3_CURRENT_ADDRESS:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_CURRENT_ADDRESS, 6, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_CURRENT_ADDRESS, 6, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     goto query_errorout;
+                 }
+@@ -458,7 +472,7 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+                 }
+                 break;
+             case OID_802_3_PERMANENT_ADDRESS:
+-                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_PERMANENT_ADDRESS, 6, data, &data_len);
++                ret = usbh_rndis_query_msg_transfer(rndis_class, OID_802_3_PERMANENT_ADDRESS, 6, data, (data_len = sizeof(data), &data_len));
+                 if (ret < 0) {
+                     goto query_errorout;
+                 }
