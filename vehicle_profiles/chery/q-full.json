@@ -1,0 +1,456 @@
+{
+  "car_model": "Chery: Q (QQ3 EV) full",
+  "init": "ATSP6;ATST96;",
+  "pids": [
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2210381",
+      "parameters": [
+        {
+          "name": "SOC",
+          "expression": "([B4:B5]*0.01-2)/0.98",
+          "unit": "%",
+          "class": "battery"
+        },
+        {
+          "name": "SOC_BMS",
+          "expression": "[B4:B5]*0.01",
+          "unit": "%",
+          "class": "battery"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2244044406",
+      "parameters": [
+        {
+          "name": "HV_V",
+          "expression": "[B5:B6]*0.1",
+          "unit": "V",
+          "class": "voltage"
+        },
+        {
+          "name": "HV_A",
+          "expression": "[B10:B11]*0.1-2047",
+          "unit": "A",
+          "class": "current"
+        },
+        {
+          "name": "HV_W",
+          "expression": "[B5:B6]*0.1*([B10:B11]*0.1-2047)/1000",
+          "unit": "kW",
+          "class": "power"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2244011",
+      "parameters": [
+        {
+          "name": "SPEED",
+          "expression": "[B4:B5]*0.0625",
+          "unit": "km/h",
+          "class": "speed"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22440E1",
+      "parameters": [
+        {
+          "name": "BATT_TEMP",
+          "expression": "B4-40",
+          "unit": "°C",
+          "class": "temperature"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2210481",
+      "parameters": [
+        {
+          "name": "SOH",
+          "expression": "[B4:B5]",
+          "unit": "%",
+          "class": "battery"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2244021",
+      "parameters": [
+        {
+          "name": "ODOMETER",
+          "expression": "[B5:B7]*0.1",
+          "unit": "km",
+          "class": "distance"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2244251",
+      "parameters": [
+        {
+          "name": "AUX_BATT_V",
+          "expression": "B4*0.1",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2244111",
+      "parameters": [
+        {
+          "name": "CELL_SUM_V",
+          "expression": "[B4:B5]*0.1",
+          "unit": "V",
+          "class": "voltage"
+        },
+        {
+          "name": "CELL_AVG_V",
+          "expression": "[B4:B5]*0.1/126",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22103A1",
+      "parameters": [
+        {
+          "name": "CELL_MAX_MV",
+          "expression": "[B4:B5]",
+          "unit": "mV",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22103C1",
+      "parameters": [
+        {
+          "name": "CELL_MIN_MV",
+          "expression": "[B4:B5]",
+          "unit": "mV",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22103E1",
+      "parameters": [
+        {
+          "name": "BATT_TEMP_MAX",
+          "expression": "B4-40",
+          "unit": "°C",
+          "class": "temperature"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "2210411",
+      "parameters": [
+        {
+          "name": "BATT_TEMP_MIN",
+          "expression": "B4-40",
+          "unit": "°C",
+          "class": "temperature"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22441F",
+      "parameters": [
+        {
+          "name": "COOLANT_IN",
+          "expression": "B5-40",
+          "unit": "°C",
+          "class": "temperature"
+        },
+        {
+          "name": "COOLANT_OUT",
+          "expression": "B6-40",
+          "unit": "°C",
+          "class": "temperature"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "224410",
+      "parameters": [
+        {
+          "name": "CHARGE_CYCLES",
+          "expression": "[B5:B6]",
+          "unit": "",
+          "class": "none"
+        },
+        {
+          "name": "DISCHARGE_CYCLES",
+          "expression": "B7*256+B9",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "220001",
+      "parameters": [
+        {
+          "name": "DC_INLET_V",
+          "expression": "[B10:B11]*0.02",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "220002",
+      "parameters": [
+        {
+          "name": "CHARGING_DC",
+          "expression": "B47",
+          "unit": "",
+          "class": "none"
+        },
+        {
+          "name": "HV_BUS_V",
+          "expression": "(B7*256+B9)*0.02",
+          "unit": "V",
+          "class": "voltage"
+        },
+        {
+          "name": "BMS_READY",
+          "expression": "B49:0",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E5;",
+      "pid": "22FD0A",
+      "parameters": [
+        {
+          "name": "AH_CHARGED_COUNTER",
+          "expression": "(B5*16777216+B6*65536+B7*256+B9)/1000",
+          "unit": "Ah",
+          "class": "none"
+        },
+        {
+          "name": "MIN_TO_FULL",
+          "expression": "[B190:B191]",
+          "unit": "min",
+          "class": "duration"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "2268021",
+      "parameters": [
+        {
+          "name": "TMP_A",
+          "expression": "B4/2-55",
+          "unit": "°C",
+          "class": "temperature"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "22520D1",
+      "parameters": [
+        {
+          "name": "GEAR",
+          "expression": "B4",
+          "unit": "",
+          "class": "none"
+        },
+        {
+          "name": "PARK_BRAKE",
+          "expression": "1-((B4+2)>>2)",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "2252121",
+      "parameters": [
+        {
+          "name": "VCU_HV_V",
+          "expression": "[B4:B5]*0.05",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "2252131",
+      "parameters": [
+        {
+          "name": "VCU_HV_A",
+          "expression": "([B4:B5]-32000)*0.1",
+          "unit": "A",
+          "class": "current"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "2252441",
+      "parameters": [
+        {
+          "name": "DRIVE_ENGAGED",
+          "expression": "B4",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "2252151",
+      "parameters": [
+        {
+          "name": "SOC_VCU",
+          "expression": "[B4:B5]",
+          "unit": "%",
+          "class": "battery"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "22681F",
+      "parameters": [
+        {
+          "name": "AC_ON",
+          "expression": "((B9+8)>>7)&1",
+          "unit": "",
+          "class": "none"
+        },
+        {
+          "name": "AC_STATE",
+          "expression": "B9",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "226867",
+      "parameters": [
+        {
+          "name": "HEATER_ON",
+          "expression": "B5",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E0;",
+      "pid": "22684E",
+      "parameters": [
+        {
+          "name": "HVAC_KW",
+          "expression": "B19*0.05",
+          "unit": "kW",
+          "class": "power"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "2243141",
+      "parameters": [
+        {
+          "name": "CHARGING",
+          "expression": "B4",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "2243101",
+      "parameters": [
+        {
+          "name": "OBC_STATE",
+          "expression": "B4",
+          "unit": "",
+          "class": "none"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "2243041",
+      "parameters": [
+        {
+          "name": "OBC_AC_A",
+          "expression": "B4",
+          "unit": "A",
+          "class": "current"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "2243031",
+      "parameters": [
+        {
+          "name": "OBC_DC_A",
+          "expression": "([B4:B5]-30000)/100",
+          "unit": "A",
+          "class": "current"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "22431C1",
+      "parameters": [
+        {
+          "name": "OBC_HV_V",
+          "expression": "[B4:B5]/10",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    },
+    {
+      "pid_init": "ATSH7E6;",
+      "pid": "2243051",
+      "parameters": [
+        {
+          "name": "DCDC_12V",
+          "expression": "[B4:B5]/128",
+          "unit": "V",
+          "class": "voltage"
+        }
+      ]
+    }
+  ]
+}
