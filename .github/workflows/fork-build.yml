@@ -1,0 +1,59 @@
+# Fork build: WiCAN Pro firmware with the patches in patches/meatpi-components
+# applied on top of a pinned meatpi-components commit. Produces the OTA .bin
+# as a workflow artifact.
+name: Fork firmware build
+on:
+  workflow_dispatch:
+    inputs:
+      idf_version:
+        description: ESP-IDF docker tag
+        default: v6.1
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - 'patches/**'
+      - 'main/**'
+      - '.github/workflows/fork-build.yml'
+
+env:
+  # meatpi-components main at the time the patch was written (2026-11-02)
+  MEATPI_COMPONENTS_REF: 061e257fc5038a589a4232ff35d7df66766ac5f2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch meatpi-components and apply patches
+        run: |
+          git clone https://github.com/meatpiHQ/meatpi-components.git components/meatpi
+          git -C components/meatpi checkout "$MEATPI_COMPONENTS_REF"
+          for p in patches/meatpi-components/*.patch; do
+            echo "Applying $p"
+            git -C components/meatpi apply --verbose "$GITHUB_WORKSPACE/$p"
+          done
+
+      - name: Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ inputs.idf_version || 'v6.1' }}
+          target: esp32s3
+          # components/meatpi/components is on the CMakeLists search path
+          command: idf.py build
+
+      - name: Collect binaries
+        run: |
+          mkdir -p out
+          sudo chown -R "$(id -u)" build || true
+          ls -la build/*.bin
+          cp build/*.bin out/
+          cp build/flash_args out/ 2>/dev/null || true
+          cp build/bootloader/bootloader.bin out/ 2>/dev/null || true
+          cp build/partition_table/partition-table.bin out/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wican-pro-modeswitch-${{ github.sha }}
+          path: out/

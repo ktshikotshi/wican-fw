@@ -1,0 +1,119 @@
+diff --git a/components/usb_eth_host/usb_eth_host_device.c b/components/usb_eth_host/usb_eth_host_device.c
+index e663fd7..7f5e5b4 100644
+--- a/components/usb_eth_host/usb_eth_host_device.c
++++ b/components/usb_eth_host/usb_eth_host_device.c
+@@ -39,6 +39,103 @@
+ 
+ static const char *TAG = "usb_eth_host";
+ 
++/*
++ * USB mode switch (fork addition, 2026-11-02): many LTE sticks enumerate
++ * first as a fake CD-ROM (mass storage) and only expose their network
++ * interface after the host sends a SCSI command. Linux does this with
++ * usb_modeswitch; WiCAN had no equivalent, so such sticks stayed a dead
++ * "mass_storage" device. For the ids below we send the switch message as
++ * a raw Bulk-Only CBW on the stick's mass-storage bulk OUT endpoint. The
++ * stick then drops off the bus and re-enumerates with its network
++ * interface (e.g. CDC-ECM), which the existing drivers pick up.
++ *
++ * Messages are 31-byte CBWs in usb_modeswitch "MessageContent" form.
++ */
++typedef struct
++{
++    uint16_t    vid;
++    uint16_t    pid;
++    const char *name;
++    uint8_t     cbw[31];
++} usb_modeswitch_entry_t;
++
++/* SCSI START STOP UNIT, LoEj=1 Start=0 (a plain "eject"). usb_modeswitch's
++ * StandardEject. Verified by hand on an Alcatel IK40 (fw IK40_IC_02.00_10):
++ * a macOS Finder eject switches 1bbb:f000 -> 1bbb:0191 (CDC-ECM). */
++#define MS_STANDARD_EJECT                                        \
++    { 0x55, 0x53, 0x42, 0x43, 0x12, 0x34, 0x56, 0x78,           \
++      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x1b,           \
++      0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,           \
++      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
++
++static const usb_modeswitch_entry_t s_modeswitch_table[] = {
++    { 0x1bbb, 0xf000, "Alcatel/TCL LTE stick (IK40 family)", MS_STANDARD_EJECT },
++};
++
++static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t s_modeswitch_buf[USB_ALIGN_UP(64, CONFIG_USB_ALIGN_SIZE)];
++static struct usbh_urb s_modeswitch_urb;
++
++/* Returns true when a switch message was sent (the device is about to
++ * leave the bus, so the caller should not record it as attached). */
++static bool usb_modeswitch_try(struct usbh_hubport *hport)
++{
++    const usb_modeswitch_entry_t *e = NULL;
++
++    for (size_t i = 0; i < sizeof(s_modeswitch_table) / sizeof(s_modeswitch_table[0]); i++)
++    {
++        if (s_modeswitch_table[i].vid == hport->device_desc.idVendor &&
++            s_modeswitch_table[i].pid == hport->device_desc.idProduct)
++        {
++            e = &s_modeswitch_table[i];
++            break;
++        }
++    }
++    if (e == NULL)
++    {
++        return false;
++    }
++
++    /* Find the mass-storage interface's bulk OUT endpoint. */
++    struct usb_endpoint_descriptor *ep_out = NULL;
++    for (uint8_t i = 0; i < hport->config.config_desc.bNumInterfaces &&
++                        i < CONFIG_USBHOST_MAX_INTERFACES && ep_out == NULL; i++)
++    {
++        struct usbh_interface_altsetting *alt = &hport->config.intf[i].altsetting[0];
++        if (alt->intf_desc.bInterfaceClass != USB_DEVICE_CLASS_MASS_STORAGE)
++        {
++            continue;
++        }
++        for (uint8_t k = 0; k < alt->intf_desc.bNumEndpoints &&
++                            k < CONFIG_USBHOST_MAX_ENDPOINTS; k++)
++        {
++            struct usb_endpoint_descriptor *ep = &alt->ep[k].ep_desc;
++            if (((ep->bEndpointAddress & 0x80) == 0) &&
++                ((ep->bmAttributes & 0x03) == 0x02))
++            {
++                ep_out = ep;
++                break;
++            }
++        }
++    }
++    if (ep_out == NULL)
++    {
++        ESP_LOGW(TAG, "modeswitch: %04x:%04x has no mass-storage bulk OUT "
++                 "endpoint", e->vid, e->pid);
++        return false;
++    }
++
++    memcpy(s_modeswitch_buf, e->cbw, sizeof(e->cbw));
++    usbh_bulk_urb_fill(&s_modeswitch_urb, hport, ep_out, s_modeswitch_buf,
++                       sizeof(e->cbw), 1000, NULL, NULL);
++    int ret = usbh_submit_urb(&s_modeswitch_urb);
++    /* The stick may detach before the CSW, so an error after the CBW
++     * went out is normal; the re-enumeration is the real result. */
++    ESP_LOGI(TAG, "modeswitch: sent switch message to %04x:%04x (%s) on "
++             "ep %02x: %d", e->vid, e->pid, e->name,
++             ep_out->bEndpointAddress, ret);
++    return true;
++}
++
+ static usb_eth_host_device_t g_dev;
+ static volatile bool g_dev_present;
+ 
+@@ -52,6 +149,10 @@ void usbh_device_mount_done_callback(struct usbh_hubport *hport,
+     {
+         return;
+     }
++    if (usb_modeswitch_try(hport))
++    {
++        return;
++    }
+     d.vid = hport->device_desc.idVendor;
+     d.pid = hport->device_desc.idProduct;
+     d.dev_class = hport->device_desc.bDeviceClass;
