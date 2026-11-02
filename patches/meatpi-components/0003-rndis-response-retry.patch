@@ -1,0 +1,100 @@
+diff --git a/components/cherryusb/class/wireless/usbh_rndis.c b/components/cherryusb/class/wireless/usbh_rndis.c
+index 9b6914d..e0bfb46 100644
+--- a/components/cherryusb/class/wireless/usbh_rndis.c
++++ b/components/cherryusb/class/wireless/usbh_rndis.c
+@@ -58,6 +58,35 @@ static bool usbh_rndis_is_ready(const struct usbh_rndis *rndis_class)
+     return rndis_class && rndis_class->hport && rndis_class->bulkin && rndis_class->bulkout;
+ }
+ 
++/* fork: GET_ENCAPSULATED_RESPONSE with retries. Without the interrupt
++ * notification endpoint the host just asks for the response, and some
++ * sticks (Alcatel IK40, Qualcomm MDM) NAK the data stage until it is
++ * ready, which can take longer than one 500 ms control timeout (seen:
++ * OID_GEN_SUPPORTED_LIST, ret -USB_ERR_TIMEOUT). Linux rndis_host also
++ * keeps asking for several seconds. */
++#define RNDIS_RESPONSE_RETRIES 10
++static int usbh_rndis_get_response(struct usbh_rndis *rndis_class, uint8_t *resp)
++{
++    struct usb_setup_packet *setup = rndis_class->hport->setup;
++    int ret = -USB_ERR_TIMEOUT;
++
++    for (int i = 0; i < RNDIS_RESPONSE_RETRIES; i++) {
++        setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
++        setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
++        setup->wValue = 0;
++        setup->wIndex = 0;
++        setup->wLength = sizeof(g_rndis_buf);
++
++        ret = usbh_control_transfer(rndis_class->hport, setup, resp);
++        if (ret != -USB_ERR_TIMEOUT) {
++            break;
++        }
++        USB_LOG_WRN("rndis response not ready (try %d), retrying\r\n", i + 1);
++        usb_osal_msleep(50);
++    }
++    return ret;
++}
++
+ static int usbh_rndis_get_notification(struct usbh_rndis *rndis_class)
+ {
+     (void)rndis_class;
+@@ -110,13 +139,7 @@ static int usbh_rndis_init_msg_transfer(struct usbh_rndis *rndis_class)
+ 
+     resp = (rndis_initialize_cmplt_t *)g_rndis_buf;
+ 
+-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
+-    setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
+-    setup->wValue = 0;
+-    setup->wIndex = 0;
+-    setup->wLength = sizeof(g_rndis_buf);
+-
+-    ret = usbh_control_transfer(rndis_class->hport, setup, (uint8_t *)resp);
++    ret = usbh_rndis_get_response(rndis_class, (uint8_t *)resp);
+     if (ret < 0) {
+         USB_LOG_ERR("init recv error, ret: %d\r\n", ret);
+         return ret;
+@@ -168,13 +191,7 @@ int usbh_rndis_query_msg_transfer(struct usbh_rndis *rndis_class, uint32_t oid,
+ 
+     resp = (rndis_query_cmplt_t *)g_rndis_buf;
+ 
+-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
+-    setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
+-    setup->wValue = 0;
+-    setup->wIndex = 0;
+-    setup->wLength = sizeof(g_rndis_buf);
+-
+-    ret = usbh_control_transfer(rndis_class->hport, setup, (uint8_t *)resp);
++    ret = usbh_rndis_get_response(rndis_class, (uint8_t *)resp);
+     if (ret < 0) {
+         USB_LOG_ERR("oid:%08x recv error, ret: %d\r\n", (unsigned int)oid, ret);
+         return ret;
+@@ -225,13 +242,7 @@ static int usbh_rndis_set_msg_transfer(struct usbh_rndis *rndis_class, uint32_t
+ 
+     resp = (rndis_set_cmplt_t *)g_rndis_buf;
+ 
+-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
+-    setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
+-    setup->wValue = 0;
+-    setup->wIndex = 0;
+-    setup->wLength = sizeof(g_rndis_buf);
+-
+-    ret = usbh_control_transfer(rndis_class->hport, setup, (uint8_t *)resp);
++    ret = usbh_rndis_get_response(rndis_class, (uint8_t *)resp);
+     if (ret < 0) {
+         USB_LOG_ERR("oid:%08x recv error, ret: %d\r\n", (unsigned int)oid, ret);
+         return ret;
+@@ -296,13 +307,7 @@ int usbh_rndis_keepalive(struct usbh_rndis *rndis_class)
+ 
+     resp = (rndis_keepalive_cmplt_t *)g_rndis_buf;
+ 
+-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
+-    setup->bRequest = CDC_REQUEST_GET_ENCAPSULATED_RESPONSE;
+-    setup->wValue = 0;
+-    setup->wIndex = 0;
+-    setup->wLength = sizeof(g_rndis_buf);
+-
+-    ret = usbh_control_transfer(rndis_class->hport, setup, (uint8_t *)resp);
++    ret = usbh_rndis_get_response(rndis_class, (uint8_t *)resp);
+     if (ret < 0) {
+         USB_LOG_ERR("keepalive recv error, ret: %d\r\n", ret);
+         return ret;
