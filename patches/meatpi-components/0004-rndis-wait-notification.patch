@@ -1,0 +1,90 @@
+diff --git a/components/cherryusb/class/wireless/usbh_rndis.c b/components/cherryusb/class/wireless/usbh_rndis.c
+index e0bfb46..a1ca6cc 100644
+--- a/components/cherryusb/class/wireless/usbh_rndis.c
++++ b/components/cherryusb/class/wireless/usbh_rndis.c
+@@ -20,7 +20,7 @@
+ 
+ #define CONFIG_USBHOST_RNDIS_ETH_MAX_FRAME_SIZE 1514
+ #define CONFIG_USBHOST_RNDIS_ETH_MSG_SIZE       (CONFIG_USBHOST_RNDIS_ETH_MAX_FRAME_SIZE + 44)
+-// static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t g_rndis_inttx_buffer[USB_ALIGN_UP(16, CONFIG_USB_ALIGN_SIZE)];
++static USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t g_rndis_inttx_buffer[USB_ALIGN_UP(64, CONFIG_USB_ALIGN_SIZE)];
+ 
+ static struct usbh_rndis g_rndis_class;
+ 
+@@ -87,19 +87,34 @@ static int usbh_rndis_get_response(struct usbh_rndis *rndis_class, uint8_t *resp
+     return ret;
+ }
+ 
++/* fork: wait for RESPONSE_AVAILABLE on the control interface's interrupt
++ * endpoint before GET_ENCAPSULATED_RESPONSE, as the RNDIS spec and Linux
++ * do. Alcatel IK40 NAKs a response read issued before it signals, and a
++ * read that timed out leaves it STALLing the next one (-USB_ERR_STALL).
++ * Bounded wait; no endpoint or no notification falls through to the
++ * plain read as before. */
++#define RNDIS_NOTIFY_TIMEOUT_MS 1000
+ static int usbh_rndis_get_notification(struct usbh_rndis *rndis_class)
+ {
+-    (void)rndis_class;
+-    // int ret;
+-    // struct usbh_urb *urb = &rndis_class->intin_urb;
+-
+-    // usbh_int_urb_fill(urb, rndis_class->hport, rndis_class->intin, g_rndis_inttx_buffer, rndis_class->intin->wMaxPacketSize, USB_OSAL_WAITING_FOREVER, NULL, NULL);
+-    // ret = usbh_submit_urb(urb);
+-    // if (ret == 0) {
+-    //     ret = urb->actual_length;
+-    // }
+-    // return ret;
+-    return 0;
++    int ret;
++    struct usbh_urb *urb = &rndis_class->intin_urb;
++
++    if (rndis_class->intin == NULL) {
++        return 0;
++    }
++    uint32_t len = (uint32_t)USB_GET_MAXPACKETSIZE(rndis_class->intin->wMaxPacketSize);
++    if (len > (uint32_t)sizeof(g_rndis_inttx_buffer)) {
++        len = (uint32_t)sizeof(g_rndis_inttx_buffer);
++    }
++    usbh_int_urb_fill(urb, rndis_class->hport, rndis_class->intin, g_rndis_inttx_buffer,
++                      len, RNDIS_NOTIFY_TIMEOUT_MS, NULL, NULL);
++    ret = usbh_submit_urb(urb);
++    if (ret == 0) {
++        ret = urb->actual_length;
++    } else {
++        USB_LOG_WRN("rndis no RESPONSE_AVAILABLE notification (%d), reading anyway\r\n", ret);
++    }
++    return ret;
+ }
+ 
+ static int usbh_rndis_init_msg_transfer(struct usbh_rndis *rndis_class)
+@@ -343,8 +358,15 @@ static int usbh_rndis_connect(struct usbh_hubport *hport, uint8_t intf)
+     hport->config.intf[intf].priv = rndis_class;
+     hport->config.intf[intf + 1].priv = NULL;
+ 
+-    // ep_desc = &hport->config.intf[intf].altsetting[0].ep[0].ep_desc;
+-    // USBH_EP_INIT(rndis_class->intin, ep_desc);
++    /* fork: the notification endpoint (interrupt IN on the control
++     * interface), used by usbh_rndis_get_notification() */
++    for (uint8_t i = 0; i < hport->config.intf[intf].altsetting[0].intf_desc.bNumEndpoints; i++) {
++        ep_desc = &hport->config.intf[intf].altsetting[0].ep[i].ep_desc;
++        if ((ep_desc->bEndpointAddress & 0x80) && ((ep_desc->bmAttributes & 0x03) == 0x03)) {
++            USBH_EP_INIT(rndis_class->intin, ep_desc);
++            break;
++        }
++    }
+ 
+     for (uint8_t i = 0; i < hport->config.intf[intf + 1].altsetting[0].intf_desc.bNumEndpoints; i++) {
+         ep_desc = &hport->config.intf[intf + 1].altsetting[0].ep[i].ep_desc;
+@@ -495,9 +517,9 @@ static int usbh_rndis_disconnect(struct usbh_hubport *hport, uint8_t intf)
+             usbh_kill_urb(&rndis_class->bulkout_urb);
+         }
+ 
+-        // if (rndis_class->intin) {
+-        //     usbh_kill_urb(&rndis_class->intin_urb);
+-        // }
++        if (rndis_class->intin) {
++            usbh_kill_urb(&rndis_class->intin_urb);
++        }
+ 
+         usbh_rndis_wait_rx_thread();
+ 
