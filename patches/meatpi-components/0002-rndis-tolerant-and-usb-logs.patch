@@ -70,10 +70,10 @@ index 4bcb5df..9b6914d 100644
  
      USB_LOG_INFO("rndis MAC address %02x:%02x:%02x:%02x:%02x:%02x\r\n",
 diff --git a/components/cherryusb/osal/idf/usb_config.h b/components/cherryusb/osal/idf/usb_config.h
-index 3a59cef..8a2dd65 100644
+index 3a59cef..b1841fc 100644
 --- a/components/cherryusb/osal/idf/usb_config.h
 +++ b/components/cherryusb/osal/idf/usb_config.h
-@@ -12,7 +12,19 @@
+@@ -12,7 +12,30 @@
  
  /* ================ USB common Configuration ================ */
  
@@ -81,14 +81,25 @@ index 3a59cef..8a2dd65 100644
 +/* fork: route CherryUSB logs through esp_log so the web UI log (and its
 + * file/ws sinks) shows enumeration and class-driver errors; esp_rom_printf
 + * only reached the UART, which a USB-host user cannot watch. */
++#include <stdarg.h>
 +#include "esp_log.h"
 +#include "freertos/FreeRTOS.h"
++/* No format attribute on purpose: CherryUSB's own format strings are not
++ * -Wformat clean on this target (uint32_t is long), and esp_log_write's
++ * attribute turned that into build errors. */
++static inline void cherryusb_log_write(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    esp_log_writev(ESP_LOG_INFO, "cherryusb", fmt, ap);
++    va_end(ap);
++}
 +#define CONFIG_USB_PRINTF(...)                                         \
 +    do {                                                               \
 +        if (xPortInIsrContext()) {                                     \
 +            esp_rom_printf(__VA_ARGS__);                               \
 +        } else {                                                       \
-+            esp_log_write(ESP_LOG_INFO, "cherryusb", __VA_ARGS__);     \
++            cherryusb_log_write(__VA_ARGS__);                          \
 +        }                                                              \
 +    } while (0)
  
