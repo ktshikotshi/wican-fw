@@ -40,8 +40,9 @@ Samples are ignored until the clock is valid (`rtc_manager_time_valid`).
 ## Page
 
 `web/cherylink.html` is one self-contained file (the WiCAN AP has no
-internet): the CheryLink app's Look C style, with Archivo embedded as a
-17 KB woff2 subset (SIL OFL, `web/Archivo-OFL.txt`). ~45 KB in flash.
+internet, ~24 KB in flash). It copies the stock web UI's colour tokens and
+dark mode (web_ui_v2 index.html) and follows its saved theme choice
+(`localStorage` key `wican-theme`), so it reads as part of the WiCAN UI.
 
 ## Surfaces
 
