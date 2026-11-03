@@ -37,6 +37,12 @@ stock Files page.
 
 Samples are ignored until the clock is valid (`rtc_manager_time_valid`).
 
+## Page
+
+`web/cherylink.html` is one self-contained file (the WiCAN AP has no
+internet): the CheryLink app's Look C style, with Archivo embedded as a
+17 KB woff2 subset (SIL OFL, `web/Archivo-OFL.txt`). ~45 KB in flash.
+
 ## Surfaces
 
 | Route | What |
