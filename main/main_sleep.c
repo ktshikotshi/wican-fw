@@ -13,6 +13,7 @@
 #include "ble_manager.h"
 #include "can_manager.h"
 #include "data_logger.h"
+#include "cherylink.h"
 #include "espnetlink_link.h"
 #include "ext_manager.h"
 #include "led_manager.h"
@@ -35,6 +36,9 @@ static void on_prepare_sleep(void)
 {
     (void)fw_update_stop(); /* a download in flight is dropped first */
     (void)autopid_stop();
+    /* fork: after autopid (no more samples): close the drive, save state
+       to /data while the filesystem is still up */
+    (void)cherylink_stop();
     (void)j1939_stop(); /* gives its bus subscription back first */
     (void)uds_manager_stop();
     (void)ext_manager_stop();

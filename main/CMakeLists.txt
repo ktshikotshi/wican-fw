@@ -28,6 +28,7 @@ idf_component_register(
              sleep_manager usb_host_manager vpn_manager ip4_routes lwip_guard flash_jobs
              websocket_manager wifi_manager esp_driver_uart esp_netif
              web_ui_v2
+             cherylink
              translator_slcan translator_realdash translator_gvret
              esp_timer nvs_flash app_update spi_flash
              button_manager multipart_upload esp_wifi esp_http_server

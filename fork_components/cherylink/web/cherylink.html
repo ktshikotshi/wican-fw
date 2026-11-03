@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CheryLink on WiCAN</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#16181d;--mute:#6b7280;--line:#e5e7eb;--acc:#0e7c66;--use:#d97706;--regen:#0e7c66;--bad:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--ink:#e8eaee;--mute:#9aa1ac;--line:#2a2f38;--acc:#34d3a6;--use:#f59e0b;--regen:#34d3a6;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{padding:14px 16px 6px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h1{font-size:18px;margin:0}
+.sub{color:var(--mute);font-size:12px}
+nav{display:flex;gap:6px;padding:0 16px 8px;overflow-x:auto}
+nav button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;white-space:nowrap}
+nav button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+main{padding:0 16px 24px;max-width:760px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:0 0 10px}
+.big{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.big div b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
+.big div span{color:var(--mute);font-size:12px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-variant-numeric:tabular-nums}
+.kv span:nth-child(odd){color:var(--mute)}
+.kv span:nth-child(even){text-align:right}
+.bars{display:flex;align-items:flex-end;gap:1px;height:90px;border-bottom:1px solid var(--line);position:relative}
+.bars i{flex:1;background:var(--use);min-height:1px;border-radius:1px 1px 0 0}
+.bars i.neg{background:var(--regen)}
+.band{display:grid;grid-template-columns:70px 1fr 64px;gap:8px;align-items:center;margin:6px 0;font-size:13px;font-variant-numeric:tabular-nums}
+.band .t{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.band .t i{display:block;height:100%;background:var(--use)}
+.band .v{text-align:right}
+.row{border-top:1px solid var(--line);padding:10px 0}
+.row:first-child{border-top:0;padding-top:0}
+.row .h{display:flex;justify-content:space-between;gap:8px}
+.row .d{color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--line);color:var(--ink);margin-left:6px}
+.pill.dc{background:var(--use);color:#fff}
+.live{border-color:var(--acc)}
+.warn{color:var(--bad);font-size:13px}
+.empty{color:var(--mute);font-size:14px}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header><h1>CheryLink</h1><span class="sub" id="st">connecting…</span></header>
+<nav id="tabs">
+<button data-t="now" class="on">Now</button><button data-t="battery">Battery</button><button data-t="eff">Efficiency</button><button data-t="drives">Drives</button><button data-t="charges">Charges</button>
+</nav>
+<main>
+<section id="now">
+ <div class="card"><div class="big">
+  <div><b id="soc">–</b><span>SOC %</span></div>
+  <div><b id="range">–</b><span>est. km</span></div>
+  <div><b id="whkm">–</b><span>Wh/km (50 km)</span></div>
+ </div></div>
+ <div class="card live hide" id="tripc"><h2>Driving now</h2><div class="kv" id="trip"></div></div>
+ <div class="card live hide" id="chargec"><h2>Charging now</h2><div class="kv" id="charge"></div></div>
+ <div class="card"><h2>Live</h2><div class="kv" id="live"></div></div>
+ <div class="card"><h2>Totals</h2><div class="kv" id="totals"></div></div>
+ <p class="warn" id="warn"></p>
+</section>
+<section id="battery" class="hide">
+ <div class="card"><h2>Pack</h2><div class="kv" id="pack"></div></div>
+ <div class="card"><h2>Cells and temps</h2><div class="kv" id="cells"></div></div>
+ <div class="card"><h2>12 V and counters</h2><div class="kv" id="aux"></div></div>
+ <p class="empty">Cell, coolant and cycle values need the q-full profile.</p>
+</section>
+<section id="eff" class="hide">
+ <div class="card"><h2>Last 10 km, Wh/km per 100 m</h2><div class="bars" id="bars"></div><div class="kv" style="margin-top:10px" id="effnow"></div></div>
+ <div class="card"><h2>By speed (km/h)</h2><div id="bySpeed"></div></div>
+ <div class="card"><h2>By outside temperature</h2><div id="byTemp"></div></div>
+</section>
+<section id="drives" class="hide"><div class="card" id="drivesList"><p class="empty">Loading…</p></div></section>
+<section id="charges" class="hide"><div class="card" id="chargesList"><p class="empty">Loading…</p></div></section>
+</main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const f=(v,d=0)=>v==null||isNaN(v)?"–":Number(v).toFixed(d);
+const dt=s=>{const d=new Date(s*1000);return d.toLocaleDateString(undefined,{day:"numeric",month:"short"})+" "+d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"})};
+const dur=s=>{s=Math.max(0,Math.round(s/60));return s<60?s+" min":Math.floor(s/60)+" h "+String(s%60).padStart(2,"0")};
+const kv=(el,rows)=>{el.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join("")};
+let tab="now",S=null;
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x===b));document.querySelectorAll("main section").forEach(s=>s.classList.toggle("hide",s.id!==tab));if(tab==="drives"||tab==="charges")lists()});
+const V=k=>S&&S.values[k]?S.values[k][0]:null;
+const A=k=>S&&S.values[k]?S.values[k][1]:null;
+function bandRows(el,b,labels){const m=Math.max(1,...b.map(x=>x.wh_km||0));el.innerHTML=b.map((x,i)=>x.km<0.4?"":`<div class="band"><span>${labels[i]}</span><span class="t"><i style="width:${Math.max(0,(x.wh_km||0)/m*100)}%"></i></span><span class="v">${f(x.wh_km)} · ${f(x.km,0)} km</span></div>`).join("")||'<p class="empty">Not enough driving yet.</p>'}
+function render(){
+ if(!S)return;
+ $("soc").textContent=f(V("SOC"));$("range").textContent=f(S.est_range_km);$("whkm").textContent=f(S.range_wh_km);
+ const tr=S.trip,ch=S.charge;
+ $("tripc").classList.toggle("hide",!tr);$("chargec").classList.toggle("hide",!ch);
+ if(tr)kv($("trip"),[["Since",dt(tr.start)],["Distance",f(tr.km,1)+" km"],["Energy",f(tr.kwh,2)+" kWh"],["Wh/km",f(tr.wh_km)],["Regen",f(tr.regen_kwh,2)+" kWh"],["SOC",f(tr.soc_start)+" → "+f(V("SOC"))+" %"]]);
+ if(ch)kv($("charge"),[["Since",dt(ch.start)+" ("+dur(S.now-ch.start)+")"],["Type",ch.dc?"DC":"AC"],["Into pack",f(ch.kwh,2)+" kWh"],["Power",f(-(S.kw||0),1)+" kW (peak "+f(ch.peak_kw,1)+")"],["SOC",f(ch.soc_start)+" → "+f(V("SOC"))+" %"],["Min to full",f(V("MIN_TO_FULL"))]]);
+ kv($("live"),[["Power",f(S.kw,1)+" kW"],["Speed",f(V("SPEED"))+" km/h"],["Now",f(S.instant_wh_km)+" Wh/km"],["Last 5 km",f(S.avg_wh_km_5)+" Wh/km"],["Outside",f(V("TMP_A"),1)+" °C"],["Odometer",f(V("ODOMETER"),1)+" km"],["Gear",{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–"]]);
+ const T=S.totals;
+ kv($("totals"),[["Since",T.since?dt(T.since):"–"],["Drives",T.drives+" · "+f(T.km,0)+" km"],["Used",f(T.kwh,1)+" kWh ("+f(T.km>0?T.kwh*1000/T.km:NaN)+" Wh/km)"],["Regen",f(T.regen_kwh,1)+" kWh"],["Charges",T.charges+" · "+f(T.charged_kwh,1)+" kWh"]]);
+ const w=[];if(!S.clock_valid)w.push("Clock not set: samples ignored until WiCAN has the time.");if(A("SOC")>300)w.push("No fresh data (car off or polling stopped).");if(S.write_errors)w.push(S.write_errors+" storage write errors.");$("warn").textContent=w.join(" ");
+ kv($("pack"),[["SOC (dash)",f(V("SOC"),1)+" %"],["SOC (BMS)",f(V("SOC_BMS"),1)+" %"],["SOH",f(V("SOH"))+" %"],["Voltage",f(V("HV_V"),1)+" V"],["Current",f(V("HV_A"),1)+" A"],["Power",f(V("HV_W"),2)+" kW"],["Energy left",f(V("SOC")!=null?V("SOC")/100*S.pack_kwh:NaN,1)+" of "+f(S.pack_kwh,1)+" kWh"]]);
+ const mx=V("CELL_MAX_MV"),mn=V("CELL_MIN_MV");
+ kv($("cells"),[["Cell max",f(mx)+" mV"],["Cell min",f(mn)+" mV"],["Spread",mx!=null&&mn!=null?f(mx-mn)+" mV":"–"],["Cell avg",f(V("CELL_AVG_V"),3)+" V"],["Pack temp",f(V("BATT_TEMP"))+" °C"],["Module max / min",f(V("BATT_TEMP_MAX"))+" / "+f(V("BATT_TEMP_MIN"))+" °C"],["Coolant in / out",f(V("COOLANT_IN"))+" / "+f(V("COOLANT_OUT"))+" °C"]]);
+ kv($("aux"),[["12 V (BMS)",f(V("AUX_BATT_V"),1)+" V"],["DC-DC out",f(V("DCDC_12V"),1)+" V"],["Charge cycles",f(V("CHARGE_CYCLES"))],["Discharge cycles",f(V("DISCHARGE_CYCLES"))],["Charged counter",f(V("AH_CHARGED_COUNTER"),1)+" Ah"]]);
+ const b=S.bars||[],m=Math.max(1,...b.map(Math.abs));
+ $("bars").innerHTML=b.length?b.map(x=>`<i class="${x<0?"neg":""}" style="height:${Math.abs(x)/m*100}%" title="${f(x)} Wh/km"></i>`).join(""):'<p class="empty">Drive a bit to fill this.</p>';
+ kv($("effnow"),[["Last 5 km",f(S.avg_wh_km_5)+" Wh/km"],["Last 50 km (range basis)",f(S.range_wh_km)+" Wh/km"],["km in the 50 km window",f(S.range_km_seen,1)]]);
+ bandRows($("bySpeed"),S.by_speed,["0–20","20–40","40–60","60–80","80–100","100–120","120+"]);
+ bandRows($("byTemp"),S.by_temp,["< 10 °C","10–20 °C","20–30 °C","30+ °C"]);
+}
+async function poll(){
+ try{const r=await fetch("/api/cherylink",{cache:"no-store"});S=await r.json();$("st").textContent="updated "+new Date().toLocaleTimeString();render()}
+ catch(e){$("st").textContent="offline"}
+}
+async function lists(){
+ try{
+  if(tab==="drives"){const d=await (await fetch("/api/cherylink/drives?limit=100")).json();
+   $("drivesList").innerHTML=d.length?d.map(t=>`<div class="row"><div class="h"><b>${dt(t.start)}</b><span>${f(t.km,1)} km</span></div><div class="d">${dur(t.end-t.start)} · ${f(t.kwh,2)} kWh · ${f(t.wh_km)} Wh/km · regen ${f(t.regen_kwh,2)} · SOC ${f(t.soc_start)}→${f(t.soc_end)}% · max ${f(t.max_speed)} km/h · ${f(t.avg_temp)} °C</div></div>`).join(""):'<p class="empty">No drives yet.</p>'}
+  if(tab==="charges"){const c=await (await fetch("/api/cherylink/charges?limit=100")).json();
+   $("chargesList").innerHTML=c.length?c.map(x=>`<div class="row"><div class="h"><b>${dt(x.start)}<span class="pill ${x.dc?"dc":""}">${x.dc?"DC":"AC"}</span></b><span>${f(x.kwh,2)} kWh</span></div><div class="d">${dur(x.end-x.start)} · SOC ${f(x.soc_start)}→${f(x.soc_end)}% · avg ${f(x.avg_kw,1)} kW · peak ${f(x.peak_kw,1)} kW · ${f(x.avg_temp)} °C</div></div>`).join(""):'<p class="empty">No charges yet.</p>'}
+ }catch(e){}
+}
+poll();setInterval(poll,3000);setInterval(()=>{if(tab==="drives"||tab==="charges")lists()},30000);
+</script>
+</body>
+</html>

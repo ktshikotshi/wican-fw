@@ -87,6 +87,10 @@ if(DEFINED ENV{MEATPI_COMPONENT_OVERLAYS})
     endforeach()
 endif()
 
+# Fork components (ktshikotshi/wican-fw): cherylink = CheryLink drive /
+# charge history, efficiency and battery info for the Chery Q.
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/fork_components")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # ---- project name and version (2026-10-18, internal/TASK_fw_update.md) -----

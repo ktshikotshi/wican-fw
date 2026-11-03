@@ -61,6 +61,7 @@
 #include "http_server_manager.h"
 #include "i2c_bus.h"
 #include "web_ui_v2.h"
+#include "cherylink.h"
 #include "imu_manager.h"
 #include "interface_manager.h"
 #include "j1939.h"
@@ -312,6 +313,9 @@ void app_main(void)
     main_boot_init("script_engine_register_http", script_engine_register_http);
     main_boot_init("config_backup_register_http", config_backup_register_http);
     main_boot_init("fw_update_register_http", fw_update_register_http);
+    /* fork: CheryLink history/efficiency/battery (/cherylink) */
+    main_boot_init("cherylink_init", cherylink_init);
+    main_boot_init("cherylink_register_http", cherylink_register_http);
     /* CLI commands: each component registers its own INSIDE its settings
        apply, gated by its `cli` setting (meatpi 2026-07-05, ownership
        lives in the component, not here); main_cli adds only the
@@ -398,7 +402,10 @@ void app_main(void)
     main_boot_start("data_destinations", data_destinations_start);
     /* AFTER external_storage: its writer follows the card mount state */
     main_boot_start("data_logger", data_logger_start);
-    /* glue: autopid samples -> the logger's params stream */
+    /* fork: CheryLink engine (loads /data/cherylink state) BEFORE the
+       sink wiring below starts feeding it */
+    main_boot_start("cherylink", cherylink_start);
+    /* glue: autopid samples -> the logger's params stream (+ cherylink) */
     main_glue_wire_autopid_logger();
     /* the backup key (NVS) and the copies worker; AFTER the filesystem, the
        card and every component whose files it mirrors (its first sweep

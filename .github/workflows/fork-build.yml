@@ -14,6 +14,7 @@ on:
     paths:
       - 'patches/**'
       - 'main/**'
+      - 'fork_components/**'
       - '.github/workflows/fork-build.yml'
 
 env:
@@ -25,6 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: cherylink engine host test
+        run: |
+          cd fork_components/cherylink/host_test
+          cc -Wall -Wextra -Werror -I../include ../cl_engine.c test_engine.c -lm -o t
+          ./t
 
       - name: Fetch meatpi-components and apply patches
         run: |

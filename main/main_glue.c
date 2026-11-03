@@ -21,6 +21,7 @@
 #include "button_manager.h"
 #include "cmdline_manager.h"
 #include "data_logger.h"
+#include "cherylink.h"
 #include "external_storage.h"
 #include "filesystem.h"
 #include "fw_update.h"
@@ -249,9 +250,18 @@ void main_glue_wire_vehicle_status(void)
 /** Composition glue: autopid samples -> the logger's params stream
  *  (gated by data_logger's autopid_log setting; both components stay
  *  ignorant of each other). */
+/* fork: autopid has ONE sink; chain the logger and cherylink (both only
+ * push to their own queues/rings, so the poller never blocks) */
+static void glue_autopid_sink(const char *name, const char *unit,
+                              double value, bool changed)
+{
+    data_logger_autopid_sink(name, unit, value, changed);
+    cherylink_autopid_sink(name, unit, value, changed);
+}
+
 void main_glue_wire_autopid_logger(void)
 {
-    autopid_set_value_sink(data_logger_autopid_sink);
+    autopid_set_value_sink(glue_autopid_sink);
 }
 
 /* ---- button CONFIG MODE (meatpi 2026-07-19, legacy config_mode.c) -----------
