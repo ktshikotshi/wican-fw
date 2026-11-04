@@ -19,6 +19,7 @@
  */
 #include "cherylink.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -55,13 +56,15 @@ static const char *TAG = "cherylink";
 #define CL_DRIVES_OLD   CL_DIR "/drives.old.jsonl"
 #define CL_CHARGES      CL_DIR "/charges.jsonl"
 #define CL_CHARGES_OLD  CL_DIR "/charges.old.jsonl"
+#define CL_ROUTES       CL_DIR "/routes"
+#define CL_ROUTES_MAX   300 /* route files kept (oldest deleted) */
 #define CL_ROTATE_BYTES (128 * 1024)
 #define CL_QUEUE_LEN    64
 #define CL_SAVE_MS      (10 * 60 * 1000)
 #define CL_TICK_MS      5000
 #define CL_PUBLISH_MS   15000
 #define CL_PENDING_MAX  4
-#define CL_LINE_MAX     512
+#define CL_LINE_MAX     768
 
 typedef struct
 {
@@ -81,6 +84,16 @@ static cl_engine_t s_snap EXT_RAM_BSS_ATTR; /* HTTP copy */
 
 static char s_pending[CL_PENDING_MAX][CL_LINE_MAX] EXT_RAM_BSS_ATTR;
 static bool s_pending_charge[CL_PENDING_MAX];
+
+/* a finished drive's route, written as /data/cherylink/routes/<start>.bin
+ * (int32 lat, lon in 1e-6 degrees, little endian) */
+typedef struct
+{
+    uint32_t start;
+    uint32_t n;
+    int32_t  pts[CL_ROUTE_MAX][2];
+} cl_route_t;
+static cl_route_t s_pending_route[CL_PENDING_MAX] EXT_RAM_BSS_ATTR;
 static int  s_pending_n;
 
 static volatile uint32_t s_dropped_full, s_dropped_clock, s_samples;
@@ -115,7 +128,8 @@ static int jnum(char *b, size_t cap, size_t at, const char *key, double v,
 
 #define JN(key, v, prec) n += jnum(buf, cap, n, key, v, prec, false)
 
-static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t)
+static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t,
+                        const cl_engine_t *e)
 {
     size_t n = (size_t)snprintf(buf, cap, "{\"start\":%.0f,\"end\":%.0f", t->start,
                          t->end);
@@ -130,6 +144,11 @@ static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t)
     JN("max_speed", t->max_speed, 0);
     JN("avg_temp", t->avg_temp, 1);
     JN("hvac_kwh", t->hvac_kwh, 3);
+    JN("start_lat", e->trip_start_lat, 6);
+    JN("start_lon", e->trip_start_lon, 6);
+    JN("end_lat", e->trip_end_lat, 6);
+    JN("end_lon", e->trip_end_lon, 6);
+    JN("route_pts", (double)e->route_n, 0);
     if (n < cap)
     {
         n += snprintf(buf + n, cap - n, "}");
@@ -137,7 +156,8 @@ static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t)
     return n < cap ? n : cap - 1;
 }
 
-static size_t charge_json(char *buf, size_t cap, const cl_charge_t *c)
+static size_t charge_json(char *buf, size_t cap, const cl_charge_t *c,
+                          const cl_engine_t *e)
 {
     size_t n = (size_t)snprintf(buf, cap,
                                 "{\"start\":%.0f,\"end\":%.0f,\"dc\":%s",
@@ -152,6 +172,8 @@ static size_t charge_json(char *buf, size_t cap, const cl_charge_t *c)
                      ? c->kwh / ((c->end - c->start) / 3600.0) : NAN, 1);
     JN("avg_temp", c->avg_temp, 1);
     JN("odo", c->odo, 1);
+    JN("lat", e->charge_lat, 6);
+    JN("lon", e->charge_lon, 6);
     if (n < cap)
     {
         n += snprintf(buf + n, cap - n, "}");
@@ -168,6 +190,10 @@ static esp_err_t job_load(void *arg)
     {
         ESP_LOGW(TAG, "mkdir %s: %d", CL_DIR, errno);
     }
+    if (mkdir(CL_ROUTES, 0775) != 0 && errno != EEXIST)
+    {
+        ESP_LOGW(TAG, "mkdir %s: %d", CL_ROUTES, errno);
+    }
     FILE *f = fopen(CL_STATE, "rb");
     if (f == NULL)
     {
@@ -176,8 +202,16 @@ static esp_err_t job_load(void *arg)
     size_t got = fread(e, 1, sizeof(*e), f);
     int extra = fgetc(f);
     fclose(f);
-    if (got != sizeof(*e) || extra != EOF || e->magic != CL_MAGIC ||
-        e->version != CL_VERSION)
+    if (extra != EOF || e->magic != CL_MAGIC)
+    {
+        return ESP_ERR_INVALID_VERSION;
+    }
+    if (e->version == 1 && got == CL_V1_SIZE)
+    {
+        cl_engine_init_v2(e); /* history kept, location starts now */
+        return ESP_OK;
+    }
+    if (got != sizeof(*e) || e->version != CL_VERSION)
     {
         return ESP_ERR_INVALID_VERSION;
     }
@@ -265,6 +299,81 @@ static esp_err_t job_read(void *arg)
     return ESP_OK;
 }
 
+static esp_err_t job_route_write(void *arg)
+{
+    const cl_route_t *r = arg;
+    char path[64];
+    snprintf(path, sizeof(path), CL_ROUTES "/%010lu.bin",
+             (unsigned long)r->start);
+    FILE *f = fopen(path, "wb");
+    if (f == NULL)
+    {
+        return ESP_FAIL;
+    }
+    size_t put = fwrite(r->pts, sizeof(r->pts[0]), r->n, f);
+    int rc = fclose(f);
+    if (put != r->n || rc != 0)
+    {
+        unlink(path);
+        return ESP_FAIL;
+    }
+    /* retention: names are zero-padded epochs, so the smallest is oldest */
+    for (;;)
+    {
+        DIR *d = opendir(CL_ROUTES);
+        if (d == NULL)
+        {
+            break;
+        }
+        unsigned count = 0;
+        char oldest[32] = "";
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL)
+        {
+            if (strstr(de->d_name, ".bin") == NULL)
+            {
+                continue;
+            }
+            count++;
+            if (oldest[0] == '\0' || strcmp(de->d_name, oldest) < 0)
+            {
+                strlcpy(oldest, de->d_name, sizeof(oldest));
+            }
+        }
+        closedir(d);
+        if (count <= CL_ROUTES_MAX || oldest[0] == '\0')
+        {
+            break;
+        }
+        snprintf(path, sizeof(path), CL_ROUTES "/%s", oldest);
+        unlink(path);
+    }
+    return ESP_OK;
+}
+
+typedef struct
+{
+    uint32_t start;
+    int32_t (*pts)[2];
+    size_t   max, n;
+} route_read_t;
+
+static esp_err_t job_route_read(void *arg)
+{
+    route_read_t *r = arg;
+    char path[64];
+    snprintf(path, sizeof(path), CL_ROUTES "/%010lu.bin",
+             (unsigned long)r->start);
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+    {
+        return ESP_ERR_NOT_FOUND;
+    }
+    r->n = fread(r->pts, sizeof(r->pts[0]), r->max, f);
+    fclose(f);
+    return ESP_OK;
+}
+
 /* ---- engine side ------------------------------------------------------------- */
 
 /* called by the engine under s_lock: format only, write after unlock */
@@ -279,13 +388,22 @@ static void on_event(cl_evt_type_t type, const void *rec, void *ctx)
     char *line = s_pending[s_pending_n];
     if (type == CL_EVT_TRIP)
     {
-        trip_json(line, CL_LINE_MAX, rec);
+        trip_json(line, CL_LINE_MAX, rec, &s_engine);
         s_pending_charge[s_pending_n] = false;
+        /* the route is still in the engine until the next drive opens */
+        cl_route_t *r = &s_pending_route[s_pending_n];
+        r->start = (uint32_t)((const cl_trip_t *)rec)->start;
+        r->n = s_engine.route_n;
+        for (uint32_t i = 0; i < r->n; i++)
+        {
+            r->pts[i][0] = (int32_t)lround(s_engine.route[i][0] * 1e6);
+            r->pts[i][1] = (int32_t)lround(s_engine.route[i][1] * 1e6);
+        }
         ESP_LOGI(TAG, "drive ended: %s", line);
     }
     else
     {
-        charge_json(line, CL_LINE_MAX, rec);
+        charge_json(line, CL_LINE_MAX, rec, &s_engine);
         s_pending_charge[s_pending_n] = true;
         ESP_LOGI(TAG, "charge ended: %s", line);
     }
@@ -315,6 +433,7 @@ static void save_state(void)
 static void write_pending(void)
 {
     static char lines[CL_PENDING_MAX][CL_LINE_MAX] EXT_RAM_BSS_ATTR;
+    static cl_route_t routes[CL_PENDING_MAX] EXT_RAM_BSS_ATTR;
     bool charge[CL_PENDING_MAX];
     xSemaphoreTake(s_lock, portMAX_DELAY);
     int n = s_pending_n;
@@ -322,6 +441,13 @@ static void write_pending(void)
     {
         memcpy(lines[i], s_pending[i], CL_LINE_MAX);
         charge[i] = s_pending_charge[i];
+        if (!charge[i])
+        {
+            routes[i].start = s_pending_route[i].start;
+            routes[i].n = s_pending_route[i].n;
+            memcpy(routes[i].pts, s_pending_route[i].pts,
+                   routes[i].n * sizeof(routes[i].pts[0]));
+        }
     }
     s_pending_n = 0;
     xSemaphoreGive(s_lock);
@@ -337,6 +463,12 @@ static void write_pending(void)
         {
             s_write_errors++;
             ESP_LOGW(TAG, "append %s failed", j.path);
+        }
+        if (!charge[i] && routes[i].n > 0 &&
+            flash_jobs_run(job_route_write, &routes[i]) != ESP_OK)
+        {
+            s_write_errors++;
+            ESP_LOGW(TAG, "route write failed");
         }
     }
     if (n > 0)
@@ -583,6 +715,18 @@ static esp_err_t status_get(httpd_req_t *req)
         n += snprintf(buf + n, cap - n, "}");
     }
 
+    {
+        bool fresh = !isnan(e->lat) && t - e->lat_at < 30;
+        n += snprintf(buf + n, cap - n, ",\"gps\":{\"fresh\":%s",
+                      fresh ? "true" : "false");
+        JN("lat", e->lat, 6);
+        JN("lon", e->lon, 6);
+        JN("age", e->lat_at > 0 ? t - e->lat_at : NAN, 0);
+        if (n < cap)
+        {
+            n += snprintf(buf + n, cap - n, "}");
+        }
+    }
     JN("est_range_km", cl_est_range_km(e), 0);
     JN("range_wh_km", cl_range_wh_km(e), 0);
     JN("range_km_seen", e->range_count + e->range_part_km, 1);
@@ -608,7 +752,7 @@ static esp_err_t status_get(httpd_req_t *req)
     char rec[CL_LINE_MAX];
     if (e->trip_open)
     {
-        trip_json(rec, sizeof(rec), &e->trip);
+        trip_json(rec, sizeof(rec), &e->trip, e);
         n += snprintf(buf + n, cap - n, ",\"trip\":%s", rec);
     }
     else
@@ -619,7 +763,7 @@ static esp_err_t status_get(httpd_req_t *req)
     {
         cl_charge_t c = e->charge;
         c.kwh = c.kwh_counter >= CL_MIN_CHARGE_KWH ? c.kwh_counter : c.kwh_vi;
-        charge_json(rec, sizeof(rec), &c);
+        charge_json(rec, sizeof(rec), &c, e);
         n += snprintf(buf + n, cap - n, ",\"charge\":%s", rec);
     }
     else
@@ -714,6 +858,70 @@ static esp_err_t history_get(httpd_req_t *req, const char *path,
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+/* GET /api/cherylink/route?start=<drive start epoch> -> [[lat,lon],...];
+ * the open drive's route when start matches it */
+static esp_err_t route_get(httpd_req_t *req)
+{
+    char q[48], v[16];
+    uint32_t start = 0;
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK &&
+        httpd_query_key_value(q, "start", v, sizeof(v)) == ESP_OK)
+    {
+        start = (uint32_t)strtoul(v, NULL, 10);
+    }
+    route_read_t r = { .start = start, .max = CL_ROUTE_MAX };
+    r.pts = heap_caps_malloc(CL_ROUTE_MAX * sizeof(r.pts[0]),
+                             MALLOC_CAP_SPIRAM);
+    if (r.pts == NULL)
+    {
+        return httpd_resp_send_500(req);
+    }
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_engine.trip_open && (uint32_t)s_engine.trip.start == start)
+    {
+        r.n = s_engine.route_n;
+        for (size_t i = 0; i < r.n; i++)
+        {
+            r.pts[i][0] = (int32_t)lround(s_engine.route[i][0] * 1e6);
+            r.pts[i][1] = (int32_t)lround(s_engine.route[i][1] * 1e6);
+        }
+        err = ESP_OK;
+    }
+    xSemaphoreGive(s_lock);
+    if (err != ESP_OK && start > 0)
+    {
+        err = flash_jobs_run(job_route_read, &r);
+    }
+    if (err != ESP_OK)
+    {
+        free(r.pts);
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "[]");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    char chunk[512];
+    size_t c = 0;
+    chunk[c++] = '[';
+    for (size_t i = 0; i < r.n; i++)
+    {
+        if (c > sizeof(chunk) - 40)
+        {
+            httpd_resp_send_chunk(req, chunk, (ssize_t)c);
+            c = 0;
+        }
+        c += (size_t)snprintf(chunk + c, sizeof(chunk) - c, "%s[%.6f,%.6f]",
+                              i ? "," : "", r.pts[i][0] / 1e6,
+                              r.pts[i][1] / 1e6);
+    }
+    chunk[c++] = ']';
+    httpd_resp_send_chunk(req, chunk, (ssize_t)c);
+    free(r.pts);
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t drives_get(httpd_req_t *req)
 {
     return history_get(req, CL_DRIVES, CL_DRIVES_OLD);
@@ -734,6 +942,8 @@ esp_err_t cherylink_register_http(void)
           .handler = drives_get },
         { .uri = "/api/cherylink/charges", .method = HTTP_GET,
           .handler = charges_get },
+        { .uri = "/api/cherylink/route", .method = HTTP_GET,
+          .handler = route_get },
     };
     return http_server_manager_register_handlers(
         URIS, sizeof(URIS) / sizeof(URIS[0]));

@@ -42,6 +42,14 @@ int cl_key_from_name(const char *name)
     {
         return -1;
     }
+    if (strcmp(name, "gps_latitude") == 0)
+    {
+        return CL_LAT;
+    }
+    if (strcmp(name, "gps_longitude") == 0)
+    {
+        return CL_LON;
+    }
     for (int i = 0; i < CL_KEY_COUNT; i++)
     {
         if (NAMES[i] != NULL && strcmp(NAMES[i], name) == 0)
@@ -57,12 +65,112 @@ const char *cl_key_name(int key)
     return (key >= 0 && key < CL_KEY_COUNT) ? NAMES[key] : "";
 }
 
+void cl_engine_init_v2(cl_engine_t *e)
+{
+    memset((char *)e + CL_V1_SIZE, 0, sizeof(*e) - CL_V1_SIZE);
+    e->lat = e->lon = NAN;
+    e->trip_start_lat = e->trip_start_lon = NAN;
+    e->trip_end_lat = e->trip_end_lon = NAN;
+    e->charge_lat = e->charge_lon = NAN;
+    e->route_step_m = CL_ROUTE_STEP_M;
+    e->version = CL_VERSION;
+}
+
 void cl_engine_init(cl_engine_t *e)
 {
     memset(e, 0, sizeof(*e));
     e->magic = CL_MAGIC;
-    e->version = CL_VERSION;
     e->ah_last = NAN;
+    cl_engine_init_v2(e);
+}
+
+/* ---- location ------------------------------------------------------------- */
+
+static double dist_m(double lat1, double lon1, double lat2, double lon2)
+{
+    const double r = 6371000.0, d2r = 3.14159265358979323846 / 180.0;
+    double x = (lon2 - lon1) * d2r * cos((lat1 + lat2) * 0.5 * d2r);
+    double y = (lat2 - lat1) * d2r;
+    return r * sqrt(x * x + y * y);
+}
+
+/* the last fix if it is at most max_age_s old (NAN lat otherwise) */
+static bool fix(const cl_engine_t *e, double t, double max_age_s,
+                double *lat, double *lon)
+{
+    if (isnan(e->lat) || isnan(e->lon) || e->lat_at <= 0 ||
+        t - e->lat_at > max_age_s || fabs(e->lat_at - e->lon_at) > 5)
+    {
+        return false;
+    }
+    *lat = e->lat;
+    *lon = e->lon;
+    return true;
+}
+
+static void route_add(cl_engine_t *e, double lat, double lon)
+{
+    if (e->route_n > 0)
+    {
+        const float *p = e->route[e->route_n - 1];
+        if (dist_m(p[0], p[1], lat, lon) < e->route_step_m)
+        {
+            return;
+        }
+    }
+    if (e->route_n >= CL_ROUTE_MAX)
+    {
+        /* full: keep every other point (the first stays), double spacing */
+        uint32_t k = 0;
+        for (uint32_t i = 0; i < e->route_n; i += 2)
+        {
+            e->route[k][0] = e->route[i][0];
+            e->route[k][1] = e->route[i][1];
+            k++;
+        }
+        e->route_n = k;
+        e->route_step_m *= 2;
+    }
+    e->route[e->route_n][0] = (float)lat;
+    e->route[e->route_n][1] = (float)lon;
+    e->route_n++;
+}
+
+/* a GPS sample: track the drive's route and end; never opens anything */
+static void gps_sample(cl_engine_t *e, int key, double v, double t)
+{
+    if (key == CL_LAT)
+    {
+        e->lat = v;
+        e->lat_at = t;
+        return;
+    }
+    e->lon = v;
+    e->lon_at = t;
+    double lat, lon;
+    if (!fix(e, t, 5, &lat, &lon) || (lat == 0 && lon == 0))
+    {
+        return;
+    }
+    if (e->trip_open)
+    {
+        if (isnan(e->trip_start_lat))
+        {
+            e->trip_start_lat = lat;
+            e->trip_start_lon = lon;
+        }
+        if (e->still_since <= 0)
+        {
+            e->trip_end_lat = lat;
+            e->trip_end_lon = lon;
+            route_add(e, lat, lon);
+        }
+    }
+    if (e->charge_open && isnan(e->charge_lat))
+    {
+        e->charge_lat = lat;
+        e->charge_lon = lon;
+    }
 }
 
 static bool has(const cl_engine_t *e, int k)
@@ -407,7 +515,16 @@ bool cl_tick(cl_engine_t *e, double t, cl_event_cb_t cb, void *ctx)
 bool cl_ingest(cl_engine_t *e, int key, double v, double t, cl_event_cb_t cb,
                void *ctx)
 {
-    if (key < 0 || key >= CL_KEY_COUNT || isnan(v) || t <= 0)
+    if (isnan(v) || t <= 0)
+    {
+        return false;
+    }
+    if (key == CL_LAT || key == CL_LON)
+    {
+        gps_sample(e, key, v, t);
+        return false;
+    }
+    if (key < 0 || key >= CL_KEY_COUNT)
     {
         return false;
     }
@@ -516,6 +633,17 @@ bool cl_ingest(cl_engine_t *e, int key, double v, double t, cl_event_cb_t cb,
             e->charge.avg_temp = NAN;
             e->charge.odo = val_or_nan(e, CL_ODO);
             e->ah_last = NAN;
+            /* a parked car may have lost its fix (garage): last known */
+            e->charge_lat = NAN;
+            e->charge_lon = NAN;
+            {
+                double la, lo;
+                if (fix(e, t, 24 * 3600.0, &la, &lo))
+                {
+                    e->charge_lat = la;
+                    e->charge_lon = lo;
+                }
+            }
             e->temp_sum = 0;
             e->temp_count = 0;
             track_reset_partial(e);
@@ -588,6 +716,19 @@ bool cl_ingest(cl_engine_t *e, int key, double v, double t, cl_event_cb_t cb,
             e->trip.odo_end = NAN;
             e->trip.avg_temp = NAN;
             e->trip.max_speed = speed;
+            e->trip_start_lat = e->trip_start_lon = NAN;
+            e->trip_end_lat = e->trip_end_lon = NAN;
+            e->route_n = 0;
+            e->route_step_m = CL_ROUTE_STEP_M;
+            {
+                double la, lo;
+                if (fix(e, t, 120, &la, &lo))
+                {
+                    e->trip_start_lat = e->trip_end_lat = la;
+                    e->trip_start_lon = e->trip_end_lon = lo;
+                    route_add(e, la, lo);
+                }
+            }
             e->still_since = 0;
             e->still_kwh = 0;
             e->temp_sum = 0;

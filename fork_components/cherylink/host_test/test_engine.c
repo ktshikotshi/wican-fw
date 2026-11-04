@@ -43,6 +43,9 @@ int main(void)
         t += 1; put(&e, "SPEED", 50, t);
         t += 1; put(&e, "HV_W", 10, t);
         if (i % 10 == 0) put(&e, "TMP_A", 22, t);
+        /* GPS 1 Hz-ish: north at 50 km/h = 27.8 m per 2 s */
+        double lat = -33.79 + (i * 2 * 50 / 3.6) / 111195.0;
+        put(&e, "gps_latitude", lat, t); put(&e, "gps_longitude", 18.51, t);
     }
     put(&e, "SOC", 76, t);
     put(&e, "ODOMETER", 1008.3, t);
@@ -57,6 +60,12 @@ int main(void)
     assert(NEAR(last_trip.km, 8.3, 0.01)); /* odometer wins */
     assert(NEAR(last_trip.kwh, 1.667, 0.05));
     assert(last_trip.soc_start == 80 && last_trip.soc_end == 76);
+    printf("route %u pts step %.0f m, start %.5f,%.5f end %.5f,%.5f\n",
+           e.route_n, e.route_step_m, e.trip_start_lat, e.trip_start_lon,
+           e.trip_end_lat, e.trip_end_lon);
+    assert(e.route_n >= 70 && e.route_n <= 85);
+    assert(NEAR(e.trip_start_lat, -33.79, 1e-6));
+    assert(NEAR((e.trip_end_lat - e.trip_start_lat) * 111195.0, 299 * 27.78, 30));
     printf("bars %u range wh/km %.1f est %.0f km, band 40-60 km %.2f wh/km %.0f\n",
            e.bar_count, cl_range_wh_km(&e), cl_est_range_km(&e),
            e.by_speed[2].km, e.by_speed[2].wh / e.by_speed[2].km);
@@ -66,6 +75,8 @@ int main(void)
 
     /* AC charge: 1 h at -6.6 kW, counter +16 Ah at 410 V */
     put(&e, "CHARGING", 1, t += 10);
+    printf("charge at %.5f,%.5f\n", e.charge_lat, e.charge_lon);
+    assert(NEAR(e.charge_lat, e.trip_end_lat, 1e-4));
     assert(e.charge_open);
     put(&e, "AH_CHARGED_COUNTER", 100, t);
     for (int i = 0; i < 1200; i++)
@@ -103,6 +114,22 @@ int main(void)
     assert(e.charge_open);
     printf("totals km %.1f kwh %.2f charged %.2f trips %u charges %u\n",
            e.total_km, e.total_kwh, e.total_charged_kwh, e.trips, e.charges);
-    printf("state blob %zu bytes\nOK\n", sizeof(e));
+    /* route decimation: 300 km straight line keeps <= CL_ROUTE_MAX */
+    {
+        static cl_engine_t r;
+        cl_engine_init(&r);
+        double tt = 1.9e9;
+        put(&r, "PARK_BRAKE", 0, tt);
+        for (int i = 0; i < 4000; i++)
+        {
+            tt += 1;
+            put(&r, "gps_latitude", -33 + i * 0.0007, tt); /* ~78 m/s */
+            put(&r, "gps_longitude", 18.5, tt);
+            put(&r, "SPEED", 100, tt);
+        }
+        printf("decimated route %u pts step %.0f m\n", r.route_n, r.route_step_m);
+        assert(r.route_n <= CL_ROUTE_MAX && r.route_step_m >= 200);
+    }
+    printf("state blob %zu bytes (v1 prefix %zu)\nOK\n", sizeof(e), (size_t)CL_V1_SIZE);
     return 0;
 }

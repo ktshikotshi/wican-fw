@@ -15,6 +15,12 @@ EfficiencyProfile, ChargeCalibration) for the Chery Q (QQ3 EV).
   by speed band and by outside temperature band.
 - **Battery**: SOC (dash + BMS), SOH, V/A/kW, cell max/min/spread, pack and
   module temps, coolant in/out, 12 V, cycle counters (q-full profile).
+- **Location** (GPS add-on, `gps_latitude`/`gps_longitude`): start and end
+  of every drive, a route point every 100 m (spacing doubles past 1000
+  points), where every charge happened. Routes live in
+  `/data/cherylink/routes/<drive start>.bin` (int32 lat/lon x1e6, last 300
+  drives). The page draws them offline and links to Google Maps; "Home" is
+  the place with the most charges.
 - **RANGE** (est. km) and **CL_WH_KM** are published back into autopid, so
   ABRP gets `est_battery_range` and HA/MQTT see both.
 
@@ -52,6 +58,7 @@ dark mode (web_ui_v2 index.html) and follows its saved theme choice
 | `GET /api/cherylink` | live values with age, range, efficiency, open drive/charge, totals |
 | `GET /api/cherylink/drives?limit=N` | finished drives, newest first |
 | `GET /api/cherylink/charges?limit=N` | finished charges, newest first |
+| `GET /api/cherylink/route?start=<epoch>` | a drive's route `[[lat,lon],...]` (the open drive's too) |
 
 ## Host test
 

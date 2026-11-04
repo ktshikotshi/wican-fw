@@ -84,6 +84,13 @@ nav button:focus-visible,.back:focus-visible{outline:2px solid var(--primary);ou
 .chip.ac{background:var(--success-tint);border-color:color-mix(in srgb,var(--success) 30%,transparent);color:var(--success)}
 .chip.good{background:var(--success-tint);border-color:color-mix(in srgb,var(--success) 30%,transparent);color:var(--success)}
 .chip.hi{background:var(--warning-tint);border-color:color-mix(in srgb,var(--warning) 30%,transparent);color:var(--warning)}
+.route{grid-column:1/-1;display:grid;gap:8px;margin-top:4px}
+.route svg{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:9px;background:var(--surface-2)}
+.links{display:flex;flex-wrap:wrap;gap:6px}
+.links a,.more{font:inherit;font-size:12.5px;font-weight:700;padding:6px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--primary);cursor:pointer}
+.links a:hover,.more:hover{background:var(--surface-3)}
+.more{justify-self:start;grid-column:1/-1;color:var(--text-2)}
+.place{color:var(--text)}
 .socbar{grid-column:1/-1;position:relative;height:6px;border-radius:3px;background:var(--bar)}
 .socbar i{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--primary)}
 .note{color:var(--muted);font-size:12.5px;margin:14px 2px 0}
@@ -126,6 +133,7 @@ nav button:focus-visible,.back:focus-visible{outline:2px solid var(--primary);ou
  <div class="tile full" id="tripc" hidden>
   <p class="lbl">Driving now</p>
   <div class="stats" id="trip"></div>
+  <div class="route" id="triproute" hidden></div>
  </div>
  <div class="tile lime full" id="chargec" hidden>
   <p class="lbl" id="chargelbl">Charging now</p>
@@ -256,10 +264,11 @@ function render(){
  gauge(S.kw);
  $("whkm").textContent=f(S.range_wh_km);$("whkm5").textContent=f(S.avg_wh_km_5);
  $("tripc").hidden=!tr;$("chargec").hidden=!ch;
- if(tr)stats($("trip"),[[f(tr.km,1)+" km","since "+tm(tr.start)],[f(tr.kwh,2)+" kWh","used"],[f(tr.wh_km),"Wh/km"],[f(tr.regen_kwh,2)+" kWh","regen"],[f(tr.soc_start)+" → "+f(soc)+"%","SOC"],[dur(S.now-tr.start),"driving"]]);
+ if(tr)stats($("trip"),[[f(tr.km,1)+" km","since "+tm(tr.start)],[esc(place(tr.start_lat,tr.start_lon)),"from"],[f(tr.kwh,2)+" kWh","used"],[f(tr.wh_km),"Wh/km"],[f(tr.regen_kwh,2)+" kWh","regen"],[f(tr.soc_start)+" → "+f(soc)+"%","SOC"],[dur(S.now-tr.start),"driving"]]);
  if(ch){$("chargelbl").textContent=(ch.dc?"DC":"AC")+" charging since "+tm(ch.start);
   stats($("charge"),[[f(-(S.kw||0),1)+" kW","now · peak "+f(ch.peak_kw,1)],[f(ch.kwh,2)+" kWh","into pack"],[f(ch.soc_start)+" → "+f(soc)+"%","SOC"],[ok(V("MIN_TO_FULL"))&&V("MIN_TO_FULL")>0?dur(V("MIN_TO_FULL")*60):"–","to full"],[dur(S.now-ch.start),"charging"]])}
- stats($("live"),[[f(V("SPEED"))+" km/h","speed"],[f(S.instant_wh_km),"Wh/km now"],[{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–","gear"],[f(V("TMP_A"),1)+" °C","outside"],[f(V("HVAC_KW"),1)+" kW","A/C"],[f(V("ODOMETER"),0)+" km","odometer"]]);
+ stats($("live"),[[f(V("SPEED"))+" km/h","speed"],[f(S.instant_wh_km),"Wh/km now"],[{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–","gear"],[f(V("TMP_A"),1)+" °C","outside"],[f(V("HVAC_KW"),1)+" kW","A/C"],[f(V("ODOMETER"),0)+" km","odometer"],[S.gps&&okLL(S.gps.lat,S.gps.lon)?`<a href="${gmap(S.gps.lat,S.gps.lon)}" target="_blank" rel="noopener">${esc(place(S.gps.lat,S.gps.lon))}</a>`:"–",S.gps&&S.gps.fresh?"location":"last location"]]);
+ tripRoute();
  const T=S.totals;$("since").textContent=T.since?new Date(T.since*1000).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"–";
  stats($("totals"),[[f(T.km,0)+" km",T.drives+" drives"],[f(T.kwh,1)+" kWh","used"],[f(T.km>0?T.kwh*1000/T.km:NaN),"Wh/km"],[f(T.charged_kwh,1)+" kWh",T.charges+" charges"]]);
  const w=[];if(!S.clock_valid)w.push("WiCAN clock not set: values are ignored until it has the time.");else if(stale)w.push("No fresh data. Car off or polling stopped.");if(S.write_errors)w.push(S.write_errors+" storage write errors.");
@@ -290,21 +299,81 @@ function groupByDay(items,row){
  items.forEach(x=>{const d=dayName(x.start);if(d!==last){out+=(last?"</div>":"")+`<p class="day">${esc(d)}</p><div class="list">`;last=d}out+=row(x)});
  return out+(last?"</div>":"");
 }
+/* ---- places -------------------------------------------------------------- */
+const okLL=(a,b)=>ok(a)&&ok(b)&&!(a===0&&b===0);
+const distM=(a,b,c,d)=>{const r=Math.PI/180,x=(d-b)*r*Math.cos((a+c)*r/2),y=(c-a)*r;return 6371000*Math.hypot(x,y)};
+let HOME=null;
+function findHome(list){ /* the place with the most charges (within 200 m), 2+ needed */
+ const pts=(list||[]).filter(c=>okLL(c.lat,c.lon));let best=null,bn=1;
+ pts.forEach(p=>{const n=pts.filter(q=>distM(p.lat,p.lon,q.lat,q.lon)<200).length;if(n>bn){bn=n;best=p}});
+ HOME=best?[best.lat,best.lon]:HOME;
+}
+const place=(la,lo)=>!okLL(la,lo)?"–":HOME&&distM(HOME[0],HOME[1],la,lo)<200?"Home":f(la,4)+", "+f(lo,4);
+const gmap=(la,lo)=>`https://www.google.com/maps/search/?api=1&query=${f(la,6)},${f(lo,6)}`;
+function gdir(pts){ /* Google Maps route: start, end, up to 8 waypoints along it */
+ const P=x=>f(x[0],6)+","+f(x[1],6),a=pts[0],b=pts[pts.length-1],w=[];
+ for(let i=1;i<=8&&pts.length>2;i++){const k=Math.round(i*(pts.length-1)/9);if(k>0&&k<pts.length-1)w.push(P(pts[k]))}
+ return `https://www.google.com/maps/dir/?api=1&origin=${P(a)}&destination=${P(b)}&travelmode=driving`+(w.length?"&waypoints="+encodeURIComponent(w.join("|")):"");
+}
+function routeSvg(pts){
+ const W=340,H=200,pad=14;if(!pts.length)return"";
+ const k=Math.cos(pts[0][0]*Math.PI/180);
+ const xs=pts.map(p=>p[1]*k),ys=pts.map(p=>p[0]);
+ const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+ const sc=Math.min((W-2*pad)/Math.max(1e-6,x1-x0),(H-2*pad)/Math.max(1e-6,y1-y0));
+ const ox=(W-(x1-x0)*sc)/2,oy=(H-(y1-y0)*sc)/2;
+ const P=pts.map((p,i)=>[(ox+(xs[i]-x0)*sc).toFixed(1),(H-oy-(ys[i]-y0)*sc).toFixed(1)]);
+ const km=pts.reduce((a,p,i)=>i?a+distM(pts[i-1][0],pts[i-1][1],p[0],p[1]):0,0)/1000;
+ const bar=Math.pow(10,Math.floor(Math.log10(Math.max(0.05,km/4)))),bpx=bar*1000/111195*sc;
+ return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Route">`+
+  `<polyline points="${P.map(p=>p.join(",")).join(" ")}" style="fill:none;stroke:var(--primary)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`+
+  `<circle cx="${P[0][0]}" cy="${P[0][1]}" r="5" style="fill:var(--success);stroke:var(--surface)" stroke-width="2"/>`+
+  `<circle cx="${P[P.length-1][0]}" cy="${P[P.length-1][1]}" r="5" style="fill:var(--danger);stroke:var(--surface)" stroke-width="2"/>`+
+  (bpx>8&&bpx<W/2?`<line x1="10" x2="${(10+bpx).toFixed(1)}" y1="${H-10}" y2="${H-10}" style="stroke:var(--text-3)" stroke-width="2"/><text x="10" y="${H-14}" style="fill:var(--text-3);font:10px var(--mono)">${bar>=1?bar+" km":bar*1000+" m"}</text>`:"")+
+  `</svg>`;
+}
+function routeBox(el,pts,t){
+ const links=[];
+ if(okLL(t.start_lat,t.start_lon))links.push(`<a href="${gmap(t.start_lat,t.start_lon)}" target="_blank" rel="noopener">Start in Maps</a>`);
+ if(okLL(t.end_lat,t.end_lon))links.push(`<a href="${gmap(t.end_lat,t.end_lon)}" target="_blank" rel="noopener">End in Maps</a>`);
+ if(pts.length>1)links.push(`<a href="${gdir(pts)}" target="_blank" rel="noopener">Route in Google Maps</a>`);
+ el.innerHTML=(pts.length>1?routeSvg(pts):'<p class="empty">No GPS route for this drive.</p>')+(links.length?`<div class="links">${links.join("")}</div>`:"");
+ el.hidden=false;
+}
+let tripRouteAt=0;
+async function tripRoute(){
+ const tr=S&&S.trip,box=$("triproute");
+ if(!tr||!okLL(tr.start_lat,tr.start_lon)){box.hidden=true;return}
+ if(tab!=="now"||Date.now()-tripRouteAt<15000)return;tripRouteAt=Date.now();
+ routeBox(box,await getRoute(tr.start),tr);
+}
+async function getRoute(start){try{const r=await fetch("/api/cherylink/route?start="+Math.round(start));return r.ok?await r.json():[]}catch(e){return[]}}
+const OPEN=new Set(),ROUTES=new Map();
+async function toggleRoute(btn){
+ const start=Number(btn.dataset.start),box=btn.parentElement.querySelector(".route");
+ if(OPEN.has(start)){OPEN.delete(start);box.hidden=true;btn.textContent="Show route";return}
+ OPEN.add(start);btn.textContent="Hide route";box.innerHTML='<p class="empty">Loading route…</p>';box.hidden=false;
+ const t=(D||[]).find(x=>Math.round(x.start)===start)||{};if(!ROUTES.has(start))ROUTES.set(start,await getRoute(start));routeBox(box,ROUTES.get(start),t);
+}
+document.addEventListener("click",e=>{const b=e.target.closest("button.more[data-start]");if(b)toggleRoute(b)});
+
 function renderLists(){
  const now=S?S.now:Date.now()/1000;
  if(D){
   const wk=D.filter(t=>t.start>now-7*86400),km=wk.reduce((a,t)=>a+(t.km||0),0),kwh=wk.reduce((a,t)=>a+(t.kwh||0),0);
   stats($("week"),[[f(km,0)+" km",wk.length+" drives"],[f(kwh,1)+" kWh","used"],[f(km>0?kwh*1000/km:NaN),"Wh/km"]]);
-  $("drivesList").innerHTML=D.length?groupByDay(D,t=>`<div class="tile row"><span class="when">${tm(t.start)}<span class="chip ${effClass(t.wh_km)}">${f(t.wh_km)} Wh/km</span></span><span class="k">${f(t.km,1)}<small> km</small></span><span class="d">${dur(t.end-t.start)} · ${f(t.kwh,2)} kWh · regen ${f(t.regen_kwh,2)} · max ${f(t.max_speed)} km/h · ${f(t.avg_temp)} °C</span><span class="socbar" title="SOC ${f(t.soc_end)} to ${f(t.soc_start)} %"><i style="left:${f(t.soc_end)}%;width:${f(Math.max(1,(t.soc_start||0)-(t.soc_end||0)),1)}%"></i></span></div>`):'<p class="empty">No drives yet.</p>';
+  $("drivesList").innerHTML=D.length?groupByDay(D,t=>`<div class="tile row"><span class="when">${tm(t.start)}<span class="chip ${effClass(t.wh_km)}">${f(t.wh_km)} Wh/km</span></span><span class="k">${f(t.km,1)}<small> km</small></span><span class="d">${dur(t.end-t.start)} · ${f(t.kwh,2)} kWh · regen ${f(t.regen_kwh,2)} · max ${f(t.max_speed)} km/h · ${f(t.avg_temp)} °C${okLL(t.start_lat,t.start_lon)?`<br><span class="place">${esc(place(t.start_lat,t.start_lon))} → ${esc(place(t.end_lat,t.end_lon))}</span>`:""}</span><span class="socbar" title="SOC ${f(t.soc_end)} to ${f(t.soc_start)} %"><i style="left:${f(t.soc_end)}%;width:${f(Math.max(1,(t.soc_start||0)-(t.soc_end||0)),1)}%"></i></span>${okLL(t.start_lat,t.start_lon)?`<button class="more" type="button" data-start="${Math.round(t.start)}">${OPEN.has(Math.round(t.start))?"Hide route":"Show route"}</button><div class="route" hidden></div>`:""}</div>`):'<p class="empty">No drives yet.</p>';
+  document.querySelectorAll("#drivesList button.more[data-start]").forEach(b=>{const st=Number(b.dataset.start);if(OPEN.has(st)&&ROUTES.has(st))routeBox(b.parentElement.querySelector(".route"),ROUTES.get(st),D.find(x=>Math.round(x.start)===st)||{})});
  }
  if(C){
+  findHome(C);
   const mo=C.filter(c=>c.start>now-30*86400),kwh=mo.reduce((a,c)=>a+(c.kwh||0),0);
   stats($("month"),[[f(kwh,1)+" kWh",mo.length+" charges"],[mo.filter(c=>c.dc).length+" DC","fast charges"],[f(mo.length?mo.reduce((a,c)=>a+(c.peak_kw||0),0)/mo.length:NaN,1)+" kW","avg peak"]]);
-  $("chargesList").innerHTML=C.length?groupByDay(C,c=>`<div class="tile row"><span class="when">${tm(c.start)}<span class="chip ${c.dc?"dc":"ac"}">${c.dc?"DC":"AC"}</span></span><span class="k">${f(c.kwh,1)}<small> kWh</small></span><span class="d">${dur(c.end-c.start)} · ${f(c.soc_start)} → ${f(c.soc_end)} % · avg ${f(c.avg_kw,1)} kW · peak ${f(c.peak_kw,1)} kW</span><span class="socbar"><i style="left:${f(c.soc_start)}%;width:${f(Math.max(1,(c.soc_end||0)-(c.soc_start||0)),1)}%"></i></span></div>`):'<p class="empty">No charges yet.</p>';
+  $("chargesList").innerHTML=C.length?groupByDay(C,c=>`<div class="tile row"><span class="when">${tm(c.start)}<span class="chip ${c.dc?"dc":"ac"}">${c.dc?"DC":"AC"}</span></span><span class="k">${f(c.kwh,1)}<small> kWh</small></span><span class="d">${dur(c.end-c.start)} · ${f(c.soc_start)} → ${f(c.soc_end)} % · avg ${f(c.avg_kw,1)} kW · peak ${f(c.peak_kw,1)} kW${okLL(c.lat,c.lon)?` · <a href="${gmap(c.lat,c.lon)}" target="_blank" rel="noopener">${esc(place(c.lat,c.lon)==="Home"?"Home":"Public · "+place(c.lat,c.lon))}</a>`:""}</span><span class="socbar"><i style="left:${f(c.soc_start)}%;width:${f(Math.max(1,(c.soc_end||0)-(c.soc_start||0)),1)}%"></i></span></div>`):'<p class="empty">No charges yet.</p>';
  }
 }
 async function poll(){
- try{const r=await fetch("/api/cherylink",{cache:"no-store"});S=await r.json();render();if(D||C)renderLists()}
+ try{const r=await fetch("/api/cherylink",{cache:"no-store"});S=await r.json();render()}
  catch(e){$("st").textContent="WiCAN offline";$("dot").style.background="var(--danger)"}
 }
 async function lists(){
@@ -314,7 +383,7 @@ async function lists(){
   renderLists();
  }catch(e){}
 }
-poll();setInterval(poll,3000);setInterval(()=>{if(tab==="drives"||tab==="charges")lists()},30000);
+poll();fetch("/api/cherylink/charges?limit=200").then(r=>r.json()).then(c=>{C=c;findHome(C)}).catch(()=>{});setInterval(poll,3000);setInterval(()=>{if(tab==="drives"||tab==="charges")lists()},30000);
 </script>
 </body>
 </html>

@@ -57,6 +57,11 @@ typedef enum
     CL_KEY_COUNT
 } cl_key_t;
 
+/* GPS (the u-blox / ESPNetLink add-on, published by main as gps_*). Kept
+ * outside val[]/at[] so the v1 state blob stays a prefix of v2. */
+#define CL_LAT 100 /* gps_latitude  */
+#define CL_LON 101 /* gps_longitude */
+
 /** autopid name -> key, or -1 when the engine ignores it. */
 int cl_key_from_name(const char *name);
 /** key -> autopid name. */
@@ -68,6 +73,8 @@ const char *cl_key_name(int key);
 #define CL_BARS            100    /* recent 0.1 km Wh/km bars (10 km)       */
 #define CL_SPEED_BANDS     7      /* 0-20 .. 100-120, 120+                  */
 #define CL_TEMP_BANDS      4      /* <10, 10-20, 20-30, 30+ °C              */
+#define CL_ROUTE_MAX       1000   /* route points kept per drive            */
+#define CL_ROUTE_STEP_M    100.0  /* first spacing; doubles when full       */
 
 typedef struct
 {
@@ -156,10 +163,25 @@ typedef struct
     double   total_km, total_kwh, total_regen_kwh, total_charged_kwh;
     uint32_t trips, charges;
     double   since;            /* when the history began */
+
+    /* ---- v2 (2026-11-04): location. Appended so a v1 blob loads as a
+     * prefix (cherylink.c). NAN = unknown. ---- */
+    double   lat, lat_at, lon, lon_at;        /* last fix and when      */
+    double   trip_start_lat, trip_start_lon;
+    double   trip_end_lat, trip_end_lon;
+    double   charge_lat, charge_lon;
+    double   route_step_m;
+    uint32_t route_n;
+    float    route[CL_ROUTE_MAX][2];          /* lat, lon of open drive */
 } cl_engine_t;
 
+/** Size of a v1 state blob (everything before the v2 fields). */
+#define CL_V1_SIZE offsetof(cl_engine_t, lat)
+/** Sets the v2 fields of an engine loaded from a v1 blob. */
+void cl_engine_init_v2(cl_engine_t *e);
+
 #define CL_MAGIC   0x434C4E4BU /* "CLNK" */
-#define CL_VERSION 1U
+#define CL_VERSION 2U
 
 void cl_engine_init(cl_engine_t *e);
 
