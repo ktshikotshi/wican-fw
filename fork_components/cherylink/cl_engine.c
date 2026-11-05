@@ -76,6 +76,33 @@ void cl_engine_init_v2(cl_engine_t *e)
     e->version = CL_VERSION;
 }
 
+bool cl_engine_sanitize(cl_engine_t *e)
+{
+    bool ok = true;
+    if (e->bar_head >= CL_BARS || e->bar_count > CL_BARS)
+    {
+        e->bar_head = e->bar_count = 0;
+        ok = false;
+    }
+    if (e->range_head >= CL_RANGE_WINDOW_KM ||
+        e->range_count > CL_RANGE_WINDOW_KM)
+    {
+        e->range_head = e->range_count = 0;
+        ok = false;
+    }
+    if (e->route_n > CL_ROUTE_MAX)
+    {
+        e->route_n = 0;
+        ok = false;
+    }
+    if (!(e->route_step_m >= CL_ROUTE_STEP_M) || isinf(e->route_step_m))
+    {
+        e->route_step_m = CL_ROUTE_STEP_M;
+        ok = false;
+    }
+    return ok;
+}
+
 void cl_engine_init(cl_engine_t *e)
 {
     memset(e, 0, sizeof(*e));

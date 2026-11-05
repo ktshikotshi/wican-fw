@@ -185,6 +185,10 @@ void cl_engine_init_v2(cl_engine_t *e);
 
 void cl_engine_init(cl_engine_t *e);
 
+/** Clamps ring heads/counts and route_n of a loaded blob into range so
+ *  no index can leave its array. Returns false when it had to fix one. */
+bool cl_engine_sanitize(cl_engine_t *e);
+
 /** One sample. Returns true when a trip or charge ended (cb called). */
 bool cl_ingest(cl_engine_t *e, int key, double value, double t,
                cl_event_cb_t cb, void *ctx);

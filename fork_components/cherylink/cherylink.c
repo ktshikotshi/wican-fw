@@ -22,6 +22,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,25 +114,61 @@ static double now_s(void)
 static int jnum(char *b, size_t cap, size_t at, const char *key, double v,
                 int prec, bool first)
 {
-    if (at >= cap)
+    if (at + 1 >= cap)
     {
         return 0;
     }
+    int w;
     if (isnan(v) || isinf(v))
     {
-        return snprintf(b + at, cap - at, "%s\"%s\":null", first ? "" : ",",
-                        key);
+        w = snprintf(b + at, cap - at, "%s\"%s\":null", first ? "" : ",", key);
     }
-    return snprintf(b + at, cap - at, "%s\"%s\":%.*f", first ? "" : ",", key,
-                    prec, v);
+    else
+    {
+        w = snprintf(b + at, cap - at, "%s\"%s\":%.*f", first ? "" : ",",
+                     key, prec, v);
+    }
+    /* cut off: stop at cap - 1 so the sum never wraps */
+    if (w < 0 || (size_t)w >= cap - at)
+    {
+        return (int)(cap - 1 - at);
+    }
+    return w;
 }
 
 #define JN(key, v, prec) n += jnum(buf, cap, n, key, v, prec, false)
 
+/* printf-append into buf[cap] at *n. *n never passes cap - 1, so a later
+ * append can never compute a wrapped (huge) size; a cut-off result leaves
+ * *n == cap - 1, which callers treat as overflow. */
+static void app(char *buf, size_t cap, size_t *n, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
+static void app(char *buf, size_t cap, size_t *n, const char *fmt, ...)
+{
+    if (*n >= cap - 1)
+    {
+        *n = cap - 1;
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(buf + *n, cap - *n, fmt, ap);
+    va_end(ap);
+    if (w < 0 || (size_t)w >= cap - *n)
+    {
+        *n = cap - 1;
+    }
+    else
+    {
+        *n += (size_t)w;
+    }
+}
+
 static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t,
                         const cl_engine_t *e)
 {
-    size_t n = (size_t)snprintf(buf, cap, "{\"start\":%.0f,\"end\":%.0f", t->start,
+    size_t n = 0;
+    app(buf, cap, &n, "{\"start\":%.0f,\"end\":%.0f", t->start,
                          t->end);
     JN("km", t->km, 2);
     JN("kwh", t->kwh, 3);
@@ -151,7 +188,7 @@ static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t,
     JN("route_pts", (double)e->route_n, 0);
     if (n < cap)
     {
-        n += snprintf(buf + n, cap - n, "}");
+        app(buf, cap, &n, "}");
     }
     return n < cap ? n : cap - 1;
 }
@@ -159,8 +196,8 @@ static size_t trip_json(char *buf, size_t cap, const cl_trip_t *t,
 static size_t charge_json(char *buf, size_t cap, const cl_charge_t *c,
                           const cl_engine_t *e)
 {
-    size_t n = (size_t)snprintf(buf, cap,
-                                "{\"start\":%.0f,\"end\":%.0f,\"dc\":%s",
+    size_t n = 0;
+    app(buf, cap, &n, "{\"start\":%.0f,\"end\":%.0f,\"dc\":%s",
                                 c->start, c->end, c->dc ? "true" : "false");
     JN("kwh", c->kwh, 3);
     JN("kwh_vi", c->kwh_vi, 3);
@@ -176,7 +213,7 @@ static size_t charge_json(char *buf, size_t cap, const cl_charge_t *c,
     JN("lon", e->charge_lon, 6);
     if (n < cap)
     {
-        n += snprintf(buf + n, cap - n, "}");
+        app(buf, cap, &n, "}");
     }
     return n < cap ? n : cap - 1;
 }
@@ -209,11 +246,14 @@ static esp_err_t job_load(void *arg)
     if (e->version == 1 && got == CL_V1_SIZE)
     {
         cl_engine_init_v2(e); /* history kept, location starts now */
-        return ESP_OK;
     }
-    if (got != sizeof(*e) || e->version != CL_VERSION)
+    else if (got != sizeof(*e) || e->version != CL_VERSION)
     {
         return ESP_ERR_INVALID_VERSION;
+    }
+    if (!cl_engine_sanitize(e))
+    {
+        ESP_LOGW(TAG, "state.bin had out-of-range indexes, clamped");
     }
     return ESP_OK;
 }
@@ -393,7 +433,7 @@ static void on_event(cl_evt_type_t type, const void *rec, void *ctx)
         /* the route is still in the engine until the next drive opens */
         cl_route_t *r = &s_pending_route[s_pending_n];
         r->start = (uint32_t)((const cl_trip_t *)rec)->start;
-        r->n = s_engine.route_n;
+        r->n = s_engine.route_n <= CL_ROUTE_MAX ? s_engine.route_n : 0;
         for (uint32_t i = 0; i < r->n; i++)
         {
             r->pts[i][0] = (int32_t)lround(s_engine.route[i][0] * 1e6);
@@ -652,23 +692,23 @@ static esp_err_t page_get(httpd_req_t *req)
 static void band_json(char *buf, size_t cap, size_t *n, const char *key,
                       const cl_band_t *b, int count)
 {
-    *n += snprintf(buf + *n, cap - *n, ",\"%s\":[", key);
+    app(buf, cap, n, ",\"%s\":[", key);
     for (int i = 0; i < count && *n < cap; i++)
     {
-        *n += snprintf(buf + *n, cap - *n, "%s{\"km\":%.2f,\"wh_km\":",
+        app(buf, cap, n, "%s{\"km\":%.2f,\"wh_km\":",
                        i ? "," : "", b[i].km);
         if (b[i].km > 0.4 && *n < cap)
         {
-            *n += snprintf(buf + *n, cap - *n, "%.0f}", b[i].wh / b[i].km);
+            app(buf, cap, n, "%.0f}", b[i].wh / b[i].km);
         }
         else if (*n < cap)
         {
-            *n += snprintf(buf + *n, cap - *n, "null}");
+            app(buf, cap, n, "null}");
         }
     }
     if (*n < cap)
     {
-        *n += snprintf(buf + *n, cap - *n, "]");
+        app(buf, cap, n, "]");
     }
 }
 
@@ -687,17 +727,19 @@ static esp_err_t status_get(httpd_req_t *req)
     xSemaphoreGive(s_lock);
     const cl_engine_t *e = &s_snap;
 
-    size_t n = (size_t)snprintf(buf, cap,
-        "{\"now\":%.0f,\"clock_valid\":%s,\"loaded\":%s,\"samples\":%lu,"
+    size_t n = 0;
+    app(buf, cap, &n, "{\"now\":%.0f,\"clock_valid\":%s,\"loaded\":%s,\"samples\":%lu,"
         "\"dropped\":%lu,\"dropped_clock\":%lu,\"write_errors\":%lu,"
         "\"saves\":%lu,\"pack_kwh\":%.3f",
         t, clock ? "true" : "false", s_loaded ? "true" : "false",
         (unsigned long)s_samples, (unsigned long)s_dropped_full,
         (unsigned long)s_dropped_clock, (unsigned long)s_write_errors,
         (unsigned long)s_saves, CL_PACK_KWH);
+    JN("stack_free", s_task ? (double)uxTaskGetStackHighWaterMark(s_task) : NAN,
+       0);
 
     /* live values: {"SOC":[value, age_s], ...} only the ones seen */
-    n += snprintf(buf + n, cap - n, ",\"values\":{");
+    app(buf, cap, &n, ",\"values\":{");
     bool first = true;
     for (int k = 0; k < CL_KEY_COUNT && n < cap; k++)
     {
@@ -705,26 +747,26 @@ static esp_err_t status_get(httpd_req_t *req)
         {
             continue;
         }
-        n += snprintf(buf + n, cap - n, "%s\"%s\":[%.3f,%.0f]",
+        app(buf, cap, &n, "%s\"%s\":[%.3f,%.0f]",
                       first ? "" : ",", cl_key_name(k), e->val[k],
                       t - e->at[k]);
         first = false;
     }
     if (n < cap)
     {
-        n += snprintf(buf + n, cap - n, "}");
+        app(buf, cap, &n, "}");
     }
 
     {
         bool fresh = !isnan(e->lat) && t - e->lat_at < 30;
-        n += snprintf(buf + n, cap - n, ",\"gps\":{\"fresh\":%s",
+        app(buf, cap, &n, ",\"gps\":{\"fresh\":%s",
                       fresh ? "true" : "false");
         JN("lat", e->lat, 6);
         JN("lon", e->lon, 6);
         JN("age", e->lat_at > 0 ? t - e->lat_at : NAN, 0);
         if (n < cap)
         {
-            n += snprintf(buf + n, cap - n, "}");
+            app(buf, cap, &n, "}");
         }
     }
     JN("est_range_km", cl_est_range_km(e), 0);
@@ -736,14 +778,14 @@ static esp_err_t status_get(httpd_req_t *req)
 
     static float bars[CL_BARS];
     size_t nb = cl_bars(e, bars, CL_BARS);
-    n += snprintf(buf + n, cap - n, ",\"bars\":[");
+    app(buf, cap, &n, ",\"bars\":[");
     for (size_t i = 0; i < nb && n < cap; i++)
     {
-        n += snprintf(buf + n, cap - n, "%s%.0f", i ? "," : "", bars[i]);
+        app(buf, cap, &n, "%s%.0f", i ? "," : "", bars[i]);
     }
     if (n < cap)
     {
-        n += snprintf(buf + n, cap - n, "]");
+        app(buf, cap, &n, "]");
     }
 
     band_json(buf, cap, &n, "by_speed", e->by_speed, CL_SPEED_BANDS);
@@ -753,25 +795,25 @@ static esp_err_t status_get(httpd_req_t *req)
     if (e->trip_open)
     {
         trip_json(rec, sizeof(rec), &e->trip, e);
-        n += snprintf(buf + n, cap - n, ",\"trip\":%s", rec);
+        app(buf, cap, &n, ",\"trip\":%s", rec);
     }
     else
     {
-        n += snprintf(buf + n, cap - n, ",\"trip\":null");
+        app(buf, cap, &n, ",\"trip\":null");
     }
     if (e->charge_open)
     {
         cl_charge_t c = e->charge;
         c.kwh = c.kwh_counter >= CL_MIN_CHARGE_KWH ? c.kwh_counter : c.kwh_vi;
         charge_json(rec, sizeof(rec), &c, e);
-        n += snprintf(buf + n, cap - n, ",\"charge\":%s", rec);
+        app(buf, cap, &n, ",\"charge\":%s", rec);
     }
     else
     {
-        n += snprintf(buf + n, cap - n, ",\"charge\":null");
+        app(buf, cap, &n, ",\"charge\":null");
     }
 
-    n += snprintf(buf + n, cap - n,
+    app(buf, cap, &n,
                   ",\"totals\":{\"since\":%.0f,\"km\":%.1f,\"kwh\":%.2f,"
                   "\"regen_kwh\":%.2f,\"charged_kwh\":%.2f,\"drives\":%lu,"
                   "\"charges\":%lu}}",
@@ -779,9 +821,10 @@ static esp_err_t status_get(httpd_req_t *req)
                   e->total_charged_kwh, (unsigned long)e->trips,
                   (unsigned long)e->charges);
 
-    if (n >= cap)
+    if (n >= cap - 1)
     {
         free(buf);
+        ESP_LOGW(TAG, "status JSON over %u B", (unsigned)cap);
         return httpd_resp_send_500(req);
     }
     httpd_resp_set_type(req, "application/json");
@@ -880,7 +923,7 @@ static esp_err_t route_get(httpd_req_t *req)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (s_engine.trip_open && (uint32_t)s_engine.trip.start == start)
     {
-        r.n = s_engine.route_n;
+        r.n = s_engine.route_n <= CL_ROUTE_MAX ? s_engine.route_n : 0;
         for (size_t i = 0; i < r.n; i++)
         {
             r.pts[i][0] = (int32_t)lround(s_engine.route[i][0] * 1e6);

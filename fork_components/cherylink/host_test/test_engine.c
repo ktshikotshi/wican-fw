@@ -130,6 +130,22 @@ int main(void)
         printf("decimated route %u pts step %.0f m\n", r.route_n, r.route_step_m);
         assert(r.route_n <= CL_ROUTE_MAX && r.route_step_m >= 200);
     }
+    /* a corrupt blob: indexes clamped, nothing out of range */
+    {
+        static cl_engine_t c;
+        cl_engine_init(&c);
+        assert(cl_engine_sanitize(&c));
+        c.bar_head = 60000; c.bar_count = 5;
+        c.range_count = 999;
+        c.route_n = 0xFFFFFFFFu;
+        c.route_step_m = NAN;
+        assert(!cl_engine_sanitize(&c));
+        assert(c.bar_head == 0 && c.bar_count == 0 && c.range_count == 0);
+        assert(c.route_n == 0 && c.route_step_m == CL_ROUTE_STEP_M);
+        float out[CL_BARS];
+        assert(cl_bars(&c, out, CL_BARS) == 0);
+        printf("sanitize ok\n");
+    }
     printf("state blob %zu bytes (v1 prefix %zu)\nOK\n", sizeof(e), (size_t)CL_V1_SIZE);
     return 0;
 }
