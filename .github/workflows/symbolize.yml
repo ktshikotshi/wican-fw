@@ -1,0 +1,51 @@
+# Rebuild candidate commits and decode a crash backtrace against each.
+# The device reports the first 8 bytes of the app ELF sha256 ("Image"),
+# so the matching build is the one whose ELF hash starts with it.
+name: Symbolize crash
+on:
+  push:
+    branches:
+      - 'claude/**'
+    paths:
+      - '.github/symbolize.txt'
+      - '.github/workflows/symbolize.yml'
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [e733410, 0874e7b, d63770f, ce9b231, 9d86fd2, 32d0573]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read crash input
+        id: crash
+        run: |
+          cp .github/symbolize.txt sym_input.txt
+          cat sym_input.txt
+      - name: Check out candidate
+        run: |
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          git checkout --force ${{ matrix.ref }}
+      - name: Fetch meatpi-components and apply patches
+        run: |
+          REF=$(grep -o 'MEATPI_COMPONENTS_REF: *[0-9a-f]*' .github/workflows/fork-build.yml | awk '{print $2}')
+          git clone https://github.com/meatpiHQ/meatpi-components.git components/meatpi
+          git -C components/meatpi checkout "$REF"
+          for p in patches/meatpi-components/*.patch; do
+            git -C components/meatpi apply "$GITHUB_WORKSPACE/$p"
+          done
+      - name: Build and decode
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          command: |
+            idf.py build >/dev/null &&
+            ELF=$(ls build/*.elf | head -1) &&
+            echo "REF ${{ matrix.ref }} ELF $ELF sha256 $(sha256sum $ELF | cut -c1-16)" &&
+            ADDRS=$(grep -i '^backtrace:' sym_input.txt | cut -d: -f2-) &&
+            xtensa-esp32s3-elf-addr2line -pfiaC -e $ELF $ADDRS
