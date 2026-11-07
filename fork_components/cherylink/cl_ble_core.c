@@ -132,7 +132,11 @@ static void on_line(clb_t *c, const char *l, double now)
         {
             a += 7;
             size_t k = 0;
-            while (a[k] != '\0' && a[k] != '"' && k + 1 < sizeof(c->app))
+            while (k + 1 < sizeof(c->app) &&
+                   ((a[k] >= 'a' && a[k] <= 'z') ||
+                    (a[k] >= 'A' && a[k] <= 'Z') ||
+                    (a[k] >= '0' && a[k] <= '9') || a[k] == '-' ||
+                    a[k] == '_' || a[k] == '.'))
             {
                 c->app[k] = a[k];
                 k++;

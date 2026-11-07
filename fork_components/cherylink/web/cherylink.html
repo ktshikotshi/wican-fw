@@ -141,6 +141,7 @@ nav button:focus-visible,.back:focus-visible{outline:2px solid var(--primary);ou
  </div>
  <div class="tile full"><p class="lbl">Live</p><div class="stats" id="live"></div></div>
  <div class="tile full"><p class="lbl">Since <span id="since">–</span></p><div class="stats" id="totals"></div></div>
+ <div class="tile full"><p class="lbl">Phone (Bluetooth)</p><div class="stats" id="blestat"></div><p class="sub" id="blehint"></p><button class="more" type="button" id="pairbtn">Allow a new phone to pair (2 min)</button></div>
  <p class="note warn full" id="warn" hidden></p>
 </section>
 
@@ -269,6 +270,10 @@ function render(){
   const chEst=!(ch.kwh>=0.01)&&ok(ch.soc_start)&&ok(soc)&&soc-ch.soc_start>=0.5,mtf=V("MIN_TO_FULL");
   stats($("charge"),[[ok(S.kw)?f(-S.kw,1)+" kW":"–",ok(S.kw)?"now · peak "+f(ch.peak_kw,1):"no power reading"],[chEst?"≈"+f((soc-ch.soc_start)/100*(S.pack_kwh||41.278),1)+" kWh":f(ch.kwh,2)+" kWh",chEst?"into pack (from SOC)":"into pack"],[f(ch.soc_start)+" → "+f(soc)+"%","SOC"],[ok(mtf)&&mtf>0&&mtf<1023?dur(mtf*60):"–","to full"],[dur(S.now-ch.start),"charging"]])}
  stats($("live"),[[f(V("SPEED"))+" km/h","speed"],[f(S.instant_wh_km),"Wh/km now"],[{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–","gear"],[f(V("TMP_A"),1)+" °C","outside"],[f(V("HVAC_KW"),1)+" kW","A/C"],[f(V("ODOMETER"),0)+" km","odometer"],[S.gps&&okLL(S.gps.lat,S.gps.lon)?`<a href="${gmap(S.gps.lat,S.gps.lon)}" target="_blank" rel="noopener">${esc(place(S.gps.lat,S.gps.lon))}</a>`:"–",S.gps&&S.gps.fresh?"location":"last location"]]);
+ {const B=S.ble||{};
+  stats($("blestat"),[[!B.enabled?"Off":B.connected?"Connected":"Not connected",B.connected&&B.app?"CheryLink "+esc(B.app):"phone"],[B.phone_abrp?"Phone":"WiCAN","sends to ABRP"],[B.pairing?(B.pairing_left>0?dur(B.pairing_left):"Open"):"Closed","pairing"]]);
+  $("blehint").textContent=!B.enabled?"Turn Bluetooth on in the WiCAN settings first.":B.pairing&&!(B.pairing_left>0)?"Pairing is always open: turn off \"Pairing at boot\" in the WiCAN Bluetooth settings once your phone is paired, and change the passkey from 123456.":"Only paired phones can connect. Press the button, then pair from the CheryLink app with your WiCAN passkey.";
+  $("pairbtn").hidden=!B.enabled||(B.pairing&&!(B.pairing_left>0));}
  tripRoute();
  const T=S.totals;$("since").textContent=T.since?new Date(T.since*1000).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"–";
  stats($("totals"),[[f(T.km,0)+" km",T.drives+" drives"],[f(T.kwh,1)+" kWh","used"],[f(T.km>0?T.kwh*1000/T.km:NaN),"Wh/km"],[f(T.charged_kwh,1)+" kWh",T.charges+" charges"]]);
@@ -356,6 +361,7 @@ async function toggleRoute(btn){
  OPEN.add(start);btn.textContent="Hide route";box.innerHTML='<p class="empty">Loading route…</p>';box.hidden=false;
  const t=(D||[]).find(x=>Math.round(x.start)===start)||{};if(!ROUTES.has(start))ROUTES.set(start,await getRoute(start));routeBox(box,ROUTES.get(start),t);
 }
+document.addEventListener("click",async e=>{if(e.target.id!=="pairbtn")return;e.target.disabled=true;try{const r=await fetch("/api/cherylink/pair",{method:"POST"});const j=await r.json();$("blehint").textContent=j.ok?"Pairing open for 2 minutes: pair from the CheryLink app now.":(j.error||"Could not open pairing")}catch(_){$("blehint").textContent="Could not reach WiCAN"}e.target.disabled=false});
 document.addEventListener("click",e=>{const b=e.target.closest("button.more[data-start]");if(b)toggleRoute(b)});
 
 function renderLists(){

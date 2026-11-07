@@ -58,6 +58,8 @@ static bool  s_rec_charge[CLB_RECORDS];
 static int   s_rec_n;
 
 static uint32_t s_frames, s_tx_errors;
+static volatile double s_pair_until; /* mono s, 0 = no timed window */
+static volatile bool   s_hold_now;
 
 static double mono_s(void)
 {
@@ -230,6 +232,14 @@ static void task_main(void *arg)
             ESP_LOGI(TAG, "ABRP sender: %s", hold ? "phone" : "WiCAN");
         }
 
+        s_hold_now = hold;
+        if (s_pair_until > 0 && now >= s_pair_until)
+        {
+            s_pair_until = 0;
+            ble_manager_pairing_disable();
+            ESP_LOGI(TAG, "pairing window closed");
+        }
+
         bool up = ble_manager_is_secured() &&
                   ble_manager_channel_out_mode(s_ch) != BLE_MANAGER_CH_OUT_NONE;
         if (!up)
@@ -273,6 +283,38 @@ static void task_main(void *arg)
     data_destinations_set_abrp_hold(false);
     s_task = NULL;
     vTaskDelete(NULL);
+}
+
+bool cl_ble_pair_open(int seconds)
+{
+    if (!ble_manager_is_enabled() || s_task == NULL)
+    {
+        return false;
+    }
+    if (ble_manager_pairing_is_enabled() && s_pair_until <= 0)
+    {
+        return true; /* open by setting (pairing_at_boot): leave it so */
+    }
+    ble_manager_pairing_enable();
+    s_pair_until = mono_s() + (seconds > 0 ? seconds : 120);
+    ESP_LOGI(TAG, "pairing window open for %d s", seconds);
+    return true;
+}
+
+void cl_ble_info(cl_ble_info_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->enabled = ble_manager_is_enabled();
+    out->connected = ble_manager_is_secured();
+    out->pairing = ble_manager_pairing_is_enabled();
+    double left = s_pair_until > 0 ? s_pair_until - mono_s() : 0;
+    out->pairing_left = left > 0 ? (int)left : 0;
+    out->phone_abrp = s_hold_now;
+    if (s_mx != NULL && xSemaphoreTake(s_mx, pdMS_TO_TICKS(50)) == pdTRUE)
+    {
+        strlcpy(out->app, s_core.app, sizeof(out->app));
+        xSemaphoreGive(s_mx);
+    }
 }
 
 esp_err_t cherylink_ble_start(void)

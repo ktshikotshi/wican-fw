@@ -42,6 +42,23 @@ handover). The CheryLink channel adds one pair of characteristics:
   `/api/cherylink/route?start=`.
 - One central at a time.
 
+## Security
+
+- Only a **paired** phone gets anything: every characteristic needs an
+  encrypted + authenticated link (LE Secure Connections with a 6-digit
+  passkey, MITM-protected). The passkey is the WiCAN `ble` setting
+  `passkey`. **Change it from the default 123456.**
+- New pairings are only accepted while the **pairing window** is open.
+  The stock default `pairing_at_boot` = true opens it at every boot, and
+  WiCAN reboots on every wake, so the window opens at every car start.
+  **Turn `pairing_at_boot` off** once the phone is paired. To pair
+  another phone later, use the /cherylink page: "Allow a new phone to
+  pair (2 min)" (`POST /api/cherylink/pair`), then pair from the app.
+- At most 3 bonded phones. A 4th pairing evicts the oldest bond.
+- Turn on the WiCAN admin password (`http_server_manager.auth_enabled`)
+  so nobody on the WiCAN Wi-Fi can open the pairing window or change the
+  settings.
+
 ## Framing
 
 UTF-8 JSON, **one object per line**, each line ends with `\n`. Every

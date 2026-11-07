@@ -772,6 +772,16 @@ static esp_err_t status_get(httpd_req_t *req)
             app(buf, cap, &n, "}");
         }
     }
+    {
+        cl_ble_info_t bi;
+        cl_ble_info(&bi);
+        app(buf, cap, &n,
+            ",\"ble\":{\"enabled\":%s,\"connected\":%s,\"pairing\":%s,"
+            "\"pairing_left\":%d,\"phone_abrp\":%s,\"app\":\"%s\"}",
+            bi.enabled ? "true" : "false", bi.connected ? "true" : "false",
+            bi.pairing ? "true" : "false", bi.pairing_left,
+            bi.phone_abrp ? "true" : "false", bi.app);
+    }
     JN("est_range_km", cl_est_range_km(e), 0);
     JN("range_wh_km", cl_range_wh_km(e), 0);
     JN("range_km_seen", e->range_count + e->range_part_km, 1);
@@ -951,6 +961,21 @@ static esp_err_t history_get(httpd_req_t *req, const char *path,
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+/* POST /api/cherylink/pair: let a new phone pair for 2 minutes (behind
+ * the WiCAN admin password when that is on, like every route) */
+static esp_err_t pair_post(httpd_req_t *req)
+{
+    bool ok = cl_ble_pair_open(120);
+    httpd_resp_set_type(req, "application/json");
+    if (!ok)
+    {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"Bluetooth is off in WiCAN settings\"}");
+    }
+    return httpd_resp_sendstr(req, "{\"ok\":true,\"seconds\":120}");
+}
+
 /* GET /api/cherylink/route?start=<drive start epoch> -> [[lat,lon],...];
  * the open drive's route when start matches it */
 static esp_err_t route_get(httpd_req_t *req)
@@ -1037,6 +1062,8 @@ esp_err_t cherylink_register_http(void)
           .handler = charges_get },
         { .uri = "/api/cherylink/route", .method = HTTP_GET,
           .handler = route_get },
+        { .uri = "/api/cherylink/pair", .method = HTTP_POST,
+          .handler = pair_post },
     };
     return http_server_manager_register_handlers(
         URIS, sizeof(URIS) / sizeof(URIS[0]));
