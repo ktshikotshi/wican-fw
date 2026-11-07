@@ -119,7 +119,7 @@ takes over (WiCAN has LTE).
 - `cl_ble.c` is the glue (task `cl_ble`), `cl_ble_core.c` the logic
   (host test `host_test/test_ble.c`).
 - The ABRP hold is `data_destinations_set_abrp_hold()`
-  (`patches/meatpi-components/0003-data-destinations-abrp-hold.patch`).
+  (`patches/meatpi-components/0004-data-destinations-abrp-hold.patch`).
   While held, due ABRP pushes are skipped without a request. The log says
   `abrp held (another sender owns it)` / `abrp resumed`.
 - Bluetooth must be enabled in WiCAN settings (stock `ble` settings).
