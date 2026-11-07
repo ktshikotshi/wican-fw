@@ -1,0 +1,43 @@
+From 3b4fe1f7b907bf8f1cf4c4e7c2b5f79b789cd933 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 7 Nov 2026 12:33:28 +0000
+Subject: [PATCH] autopid: undo an OBD app's ISO-TP settings when polling
+ resumes
+
+After an external ELM327 app (Wi-Fi/BLE) goes idle, the poller restored
+only the prelude (ATS1;ATH1;ATST96;ATTP;ATSH;ATCRA). An app that left
+ATCAF0 (monitor), ATCFC0 or ATFCSH/ATFCSM1 aimed at another ECU kept the
+chip from sending flow control: every multi-frame reply stopped at its
+first frame and only single-frame rows kept updating. Send every undo
+command on that restore.
+---
+ components/autopid/autopid_baseline.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/components/autopid/autopid_baseline.c b/components/autopid/autopid_baseline.c
+index 1a20241..39961a4 100644
+--- a/components/autopid/autopid_baseline.c
++++ b/components/autopid/autopid_baseline.c
+@@ -242,7 +242,18 @@ void ap_runner_restore_baseline(void)
+        the std scan uses - ATTP not ATSP, so no EEPROM write), then let
+        the next poll replay the configured type/PID inits on top. A
+        prelude the guard has no verdict for is left to the next poll. */
+-    (void)ap_base_send_baseline(NULL);
++    /* An app can also leave the chip's ISO-TP handling moved: CAN
++       auto-formatting off (ATCAF0, a monitor session), flow control off
++       (ATCFC0) or user flow control aimed at another ECU
++       (ATFCSH7E0;ATFCSM1). The prelude puts none of these back, so after
++       such a session every multi-frame reply stopped at its first frame
++       (no flow control reached the ECU) while single-frame rows kept
++       updating. The app's changes are not tracked: undo all of them. */
++    s_mem.moved = AP_SETS_EXT_ADDR | AP_SETS_FLOW_CTL | AP_SETS_FC_OFF |
++                  AP_SETS_TIMING | AP_SETS_RAW | AP_SETS_PRIORITY |
++                  AP_SETS_ECHO | AP_SETS_LINEFEED | AP_SETS_QUIET |
++                  AP_SETS_DLC;
++    (void)ap_base_restore(NULL);
+     ap_runner_reset();
+ }
+ 
+-- 
+2.43.0
+
