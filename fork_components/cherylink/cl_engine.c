@@ -608,7 +608,7 @@ bool cl_ingest(cl_engine_t *e, int key, double v, double t, cl_event_cb_t cb,
         power_sample = true;
         kw = v;
     }
-    else if (key == CL_HV_A && !e->seen_hv_w &&
+    else if (key == CL_HV_A && isnan(cl_fresh(e, CL_HV_W, t, 15)) &&
              !isnan(cl_fresh(e, CL_HV_V, t, 15)))
     {
         power_sample = true;

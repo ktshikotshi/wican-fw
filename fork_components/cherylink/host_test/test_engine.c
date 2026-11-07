@@ -130,6 +130,31 @@ int main(void)
         printf("decimated route %u pts step %.0f m\n", r.route_n, r.route_step_m);
         assert(r.route_n <= CL_ROUTE_MAX && r.route_step_m >= 200);
     }
+    /* HV_W seen once, then missing for a whole drive: V x A carries it */
+    {
+        static cl_engine_t h;
+        cl_engine_init(&h);
+        double tt = 2.0e9;
+        put(&h, "HV_W", 1.0, tt);
+        trips = 0;
+        for (int i = 0; i < 600; i++) /* 50 min at 60 km/h, 5 s polls */
+        {
+            tt += 5;
+            put(&h, "SPEED", 60, tt);
+            put(&h, "HV_V", 380, tt);
+            put(&h, "HV_A", 25, tt); /* 9.5 kW */
+        }
+        for (int i = 0; i < 60; i++)
+        {
+            tt += 5;
+            put(&h, "SPEED", 0, tt);
+            put(&h, "PARK_BRAKE", 1, tt);
+        }
+        printf("fallback drive: %d trips, %.2f km %.3f kWh\n", trips,
+               last_trip.km, last_trip.kwh);
+        assert(trips == 1 && last_trip.kwh > 7.5 && last_trip.kwh < 8.5);
+    }
+
     /* a corrupt blob: indexes clamped, nothing out of range */
     {
         static cl_engine_t c;
