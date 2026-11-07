@@ -141,7 +141,7 @@ nav button:focus-visible,.back:focus-visible{outline:2px solid var(--primary);ou
  </div>
  <div class="tile full"><p class="lbl">Live</p><div class="stats" id="live"></div></div>
  <div class="tile full"><p class="lbl">Since <span id="since">–</span></p><div class="stats" id="totals"></div></div>
- <div class="tile full"><p class="lbl">Phone (Bluetooth)</p><div class="stats" id="blestat"></div><p class="sub" id="blehint"></p><button class="more" type="button" id="pairbtn">Allow a new phone to pair (2 min)</button></div>
+ <div class="tile full"><p class="lbl">Phone</p><div class="stats" id="blestat"></div><p class="sub" id="blehint"></p><button class="more" type="button" id="pairbtn">Allow a new phone to pair (2 min)</button></div>
  <p class="note warn full" id="warn" hidden></p>
 </section>
 
@@ -271,7 +271,7 @@ function render(){
   stats($("charge"),[[ok(S.kw)?f(-S.kw,1)+" kW":"–",ok(S.kw)?"now · peak "+f(ch.peak_kw,1):"no power reading"],[chEst?"≈"+f((soc-ch.soc_start)/100*(S.pack_kwh||41.278),1)+" kWh":f(ch.kwh,2)+" kWh",chEst?"into pack (from SOC)":"into pack"],[f(ch.soc_start)+" → "+f(soc)+"%","SOC"],[ok(mtf)&&mtf>0&&mtf<1023?dur(mtf*60):"–","to full"],[dur(S.now-ch.start),"charging"]])}
  stats($("live"),[[f(V("SPEED"))+" km/h","speed"],[f(S.instant_wh_km),"Wh/km now"],[{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–","gear"],[f(V("TMP_A"),1)+" °C","outside"],[f(V("HVAC_KW"),1)+" kW","A/C"],[f(V("ODOMETER"),0)+" km","odometer"],[S.gps&&okLL(S.gps.lat,S.gps.lon)?`<a href="${gmap(S.gps.lat,S.gps.lon)}" target="_blank" rel="noopener">${esc(place(S.gps.lat,S.gps.lon))}</a>`:"–",S.gps&&S.gps.fresh?"location":"last location"]]);
  {const B=S.ble||{};
-  stats($("blestat"),[[!B.enabled?"Off":B.connected?"Connected":"Not connected",B.connected&&B.app?"CheryLink "+esc(B.app):"phone"],[B.phone_abrp?"Phone":"WiCAN","sends to ABRP"],[B.pairing?(B.pairing_left>0?dur(B.pairing_left):"Open"):"Closed","pairing"]]);
+  stats($("blestat"),[[B.connected?"Bluetooth":B.wifi?"Wi-Fi":!B.enabled?"Bluetooth off":"Not connected",(B.connected||B.wifi)&&B.app?"CheryLink "+esc(B.app):"phone"],[B.phone_abrp?"Phone":"WiCAN","sends to ABRP"],[B.pairing?(B.pairing_left>0?dur(B.pairing_left):"Open"):"Closed","pairing"]]);
   $("blehint").textContent=!B.enabled?"Turn Bluetooth on in the WiCAN settings first.":B.pairing&&!(B.pairing_left>0)?"Pairing is always open: turn off \"Pairing at boot\" in the WiCAN Bluetooth settings once your phone is paired, and change the passkey from 123456.":"Only paired phones can connect. Press the button, then pair from the CheryLink app with your WiCAN passkey.";
   $("pairbtn").hidden=!B.enabled||(B.pairing&&!(B.pairing_left>0));}
  tripRoute();

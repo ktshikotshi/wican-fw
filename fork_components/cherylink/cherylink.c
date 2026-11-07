@@ -777,10 +777,12 @@ static esp_err_t status_get(httpd_req_t *req)
         cl_ble_info(&bi);
         app(buf, cap, &n,
             ",\"ble\":{\"enabled\":%s,\"connected\":%s,\"pairing\":%s,"
-            "\"pairing_left\":%d,\"phone_abrp\":%s,\"app\":\"%s\"}",
+            "\"pairing_left\":%d,\"phone_abrp\":%s,\"wifi\":%s,"
+            "\"app\":\"%s\"}",
             bi.enabled ? "true" : "false", bi.connected ? "true" : "false",
             bi.pairing ? "true" : "false", bi.pairing_left,
-            bi.phone_abrp ? "true" : "false", bi.app);
+            bi.phone_abrp ? "true" : "false",
+            bi.wifi_connected ? "true" : "false", bi.app);
     }
     JN("est_range_km", cl_est_range_km(e), 0);
     JN("range_wh_km", cl_range_wh_km(e), 0);

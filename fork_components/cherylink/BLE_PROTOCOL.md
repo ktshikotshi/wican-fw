@@ -1,4 +1,4 @@
-# CheryLink over Bluetooth: the WiCAN side (protocol 1)
+# CheryLink phone feed: the WiCAN side (protocol 1, Bluetooth + Wi-Fi)
 
 WiCAN polls the car with autopid (the Chery Q profile). The CheryLink app
 connects over Bluetooth and **receives** what WiCAN reads. The app puts
@@ -41,6 +41,27 @@ handover). The CheryLink channel adds one pair of characteristics:
   `GET /api/cherylink/drives`, `/api/cherylink/charges`,
   `/api/cherylink/route?start=`.
 - One central at a time.
+
+## Wi-Fi transport (same protocol)
+
+The same feed runs over **TCP port 35001** on every WiCAN interface (its
+own access point `192.168.0.10`, or its address on your Wi-Fi). Connect,
+then read and write exactly the bytes described below (newline-delimited
+JSON both ways, the same `hello` / `v` / `s` / `trip` / `charge` frames
+and the same `hello` / `hb` / `bye` messages). The `hello` frame says
+`"link":"wifi"` (or `"ble"`).
+
+- One phone at a time: a new connection replaces the previous one.
+- Nothing to subscribe: frames start right after the connect.
+- The ELM327 port (35000) stays as before, for scan programs and the
+  module map. A phone on the feed does not need it. While an app talks
+  ELM on 35000, WiCAN's own polling pauses (stock), so the feed goes
+  quiet. Use one or the other.
+- No pairing on this port. Anyone who can reach the WiCAN on Wi-Fi can
+  read the feed (as with the ELM port), so keep the WiCAN access point's
+  Wi-Fi password set. WiCAN's LTE uplink takes no inbound connections.
+- Bluetooth and Wi-Fi can run at the same time. ABRP is held while
+  either phone link says `abrp:true`.
 
 ## Security
 

@@ -28,6 +28,15 @@ static bool name_ok(const char *s)
     return n > 0;
 }
 
+static uint32_t next_seq(clb_t *c)
+{
+    if (++c->seq == 0) /* 0 means "never sent": skip it on wrap */
+    {
+        c->seq = 1;
+    }
+    return c->seq;
+}
+
 bool clb_put(clb_t *c, const char *name, double v)
 {
     if (name == NULL || !name_ok(name))
@@ -40,7 +49,7 @@ bool clb_put(clb_t *c, const char *name, double v)
         if (strcmp(c->vals[i].name, name) == 0)
         {
             c->vals[i].v = v;
-            c->vals[i].dirty = true;
+            c->vals[i].seq = next_seq(c);
             return true;
         }
     }
@@ -49,22 +58,26 @@ bool clb_put(clb_t *c, const char *name, double v)
         c->skipped++;
         return false;
     }
-    clb_val_t *e = &c->vals[c->n++];
+    clb_val_t *e = &c->vals[c->n];
     strcpy(e->name, name); /* name_ok: shorter than CLB_NAME_MAX */
     e->v = v;
-    e->dirty = true;
+    e->seq = next_seq(c);
+    c->n++;
     return true;
 }
 
-void clb_mark_all_dirty(clb_t *c)
+void clb_sub_init(clb_sub_t *s)
 {
-    for (size_t i = 0; i < c->n; i++)
-    {
-        c->vals[i].dirty = true;
-    }
+    memset(s, 0, sizeof(*s));
 }
 
-size_t clb_values_frame(clb_t *c, char *buf, size_t cap, double ts)
+void clb_sub_resync(clb_sub_t *s)
+{
+    memset(s->sent, 0, sizeof(s->sent));
+}
+
+size_t clb_values_frame(const clb_t *c, clb_sub_t *s, char *buf, size_t cap,
+                        double ts)
 {
     /* "}}\n" + NUL closes the frame */
     const size_t tail = 4;
@@ -81,8 +94,8 @@ size_t clb_values_frame(clb_t *c, char *buf, size_t cap, double ts)
     size_t items = 0;
     for (size_t i = 0; i < c->n; i++)
     {
-        clb_val_t *e = &c->vals[i];
-        if (!e->dirty)
+        const clb_val_t *e = &c->vals[i];
+        if (e->seq == s->sent[i])
         {
             continue;
         }
@@ -99,16 +112,16 @@ size_t clb_values_frame(clb_t *c, char *buf, size_t cap, double ts)
         }
         if (w < 0 || (size_t)w >= sizeof(one))
         {
-            e->dirty = false; /* cannot happen with name_ok; never loop */
+            s->sent[i] = e->seq; /* cannot happen with name_ok; never loop */
             continue;
         }
         if (n + (size_t)w + tail > cap)
         {
-            break; /* stays dirty: the next frame takes it */
+            break; /* not marked: the next frame takes it */
         }
         memcpy(buf + n, one, (size_t)w);
         n += (size_t)w;
-        e->dirty = false;
+        s->sent[i] = e->seq;
         items++;
     }
     if (items == 0)
@@ -119,70 +132,70 @@ size_t clb_values_frame(clb_t *c, char *buf, size_t cap, double ts)
     return n + 3;
 }
 
-static void on_line(clb_t *c, const char *l, double now)
+static void on_line(clb_sub_t *s, const char *l, double now)
 {
     if (strstr(l, "\"t\":\"hello\"") != NULL ||
         strstr(l, "\"t\":\"hb\"") != NULL)
     {
-        c->last_msg = now;
-        c->phone_abrp = strstr(l, "\"abrp\":true") != NULL;
-        c->msgs++;
+        s->last_msg = now;
+        s->phone_abrp = strstr(l, "\"abrp\":true") != NULL;
+        s->msgs++;
         const char *a = strstr(l, "\"app\":\"");
         if (a != NULL)
         {
             a += 7;
             size_t k = 0;
-            while (k + 1 < sizeof(c->app) &&
+            while (k + 1 < sizeof(s->app) &&
                    ((a[k] >= 'a' && a[k] <= 'z') ||
                     (a[k] >= 'A' && a[k] <= 'Z') ||
                     (a[k] >= '0' && a[k] <= '9') || a[k] == '-' ||
                     a[k] == '_' || a[k] == '.'))
             {
-                c->app[k] = a[k];
+                s->app[k] = a[k];
                 k++;
             }
-            c->app[k] = '\0';
+            s->app[k] = '\0';
         }
     }
     else if (strstr(l, "\"t\":\"bye\"") != NULL)
     {
-        c->phone_abrp = false;
-        c->msgs++;
+        s->phone_abrp = false;
+        s->msgs++;
     }
 }
 
-void clb_rx(clb_t *c, const uint8_t *d, size_t n, double now)
+void clb_rx(clb_sub_t *s, const uint8_t *d, size_t n, double now)
 {
     for (size_t i = 0; i < n; i++)
     {
         char ch = (char)d[i];
         if (ch == '\n' || ch == '\r')
         {
-            if (!c->line_overflow && c->line_n > 0)
+            if (!s->line_overflow && s->line_n > 0)
             {
-                c->line[c->line_n] = '\0';
-                on_line(c, c->line, now);
+                s->line[s->line_n] = '\0';
+                on_line(s, s->line, now);
             }
-            c->line_n = 0;
-            c->line_overflow = false;
+            s->line_n = 0;
+            s->line_overflow = false;
             continue;
         }
-        if (c->line_n + 1 >= sizeof(c->line))
+        if (s->line_n + 1 >= sizeof(s->line))
         {
-            c->line_overflow = true; /* drop the rest of this line */
+            s->line_overflow = true; /* drop the rest of this line */
             continue;
         }
-        c->line[c->line_n++] = ch;
+        s->line[s->line_n++] = ch;
     }
 }
 
-void clb_link_down(clb_t *c)
+void clb_link_down(clb_sub_t *s)
 {
-    c->line_n = 0;
-    c->line_overflow = false;
+    s->line_n = 0;
+    s->line_overflow = false;
 }
 
-bool clb_abrp_hold(const clb_t *c, double now)
+bool clb_abrp_hold(const clb_sub_t *s, double now)
 {
-    return c->phone_abrp && c->last_msg > 0 && now - c->last_msg < CLB_HOLD_S;
+    return s->phone_abrp && s->last_msg > 0 && now - s->last_msg < CLB_HOLD_S;
 }

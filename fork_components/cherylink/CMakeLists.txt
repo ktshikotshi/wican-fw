@@ -7,5 +7,5 @@ idf_component_register(
     EMBED_FILES "web/cherylink.html"
     PRIV_REQUIRES autopid flash_jobs http_server_manager rtc_manager
                   esp_http_server esp_timer ble_manager
-                  data_destinations esp_app_format
+                  data_destinations esp_app_format lwip
 )

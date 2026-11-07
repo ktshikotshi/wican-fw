@@ -31,6 +31,7 @@ typedef struct
     bool pairing;      /* new phones may pair now           */
     int  pairing_left; /* s until the window closes, 0 = stays open / closed */
     bool phone_abrp;   /* the phone owns ABRP now           */
+    bool wifi_connected; /* a phone on the Wi-Fi feed (tcp)  */
     char app[16];      /* "ios" / "android" from its hello  */
 } cl_ble_info_t;
 
