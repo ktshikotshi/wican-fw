@@ -380,6 +380,8 @@ void app_main(void)
     /* channels MUST register before the GATT table is built (below) */
     main_boot_start("ble_http", ble_http_start);
     main_boot_start("ble_j2534", ble_j2534_start);
+    /* fork: CheryLink BLE channel (FFF7/FFF8), before ble_manager_start */
+    main_boot_start("cherylink_ble", cherylink_ble_start);
     bool ble_ok = main_boot_start("ble_manager", ble_manager_start);
     /* arbitration AFTER both radios exist (it actuates them) */
     main_boot_start("interface_manager", interface_manager_start);

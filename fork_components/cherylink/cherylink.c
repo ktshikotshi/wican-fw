@@ -47,6 +47,7 @@
 #include "rtc_manager.h"
 
 #include "cl_engine.h"
+#include "cl_internal.h"
 
 static const char *TAG = "cherylink";
 
@@ -504,6 +505,7 @@ static void write_pending(void)
             s_write_errors++;
             ESP_LOGW(TAG, "append %s failed", j.path);
         }
+        cl_ble_on_record(charge[i], lines[i]);
         if (!charge[i] && routes[i].n > 0 &&
             flash_jobs_run(job_route_write, &routes[i]) != ESP_OK)
         {
@@ -584,6 +586,7 @@ void cherylink_autopid_sink(const char *name, const char *unit, double value,
     {
         return;
     }
+    cl_ble_on_value(name, value);
     int key = cl_key_from_name(name);
     if (key < 0)
     {
@@ -832,6 +835,53 @@ static esp_err_t status_get(httpd_req_t *req)
     esp_err_t err = httpd_resp_send(req, buf, (ssize_t)n);
     free(buf);
     return err;
+}
+
+/* the Bluetooth status frame body (cl_ble.c, its own task) */
+size_t cl_status_compact(char *buf, size_t cap)
+{
+    static cl_engine_t snap EXT_RAM_BSS_ATTR;
+    static char rec[CL_LINE_MAX] EXT_RAM_BSS_ATTR;
+    if (s_lock == NULL || cap < 64)
+    {
+        return 0;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    snap = s_engine;
+    xSemaphoreGive(s_lock);
+    const cl_engine_t *e = &snap;
+    size_t n = 0;
+    app(buf, cap, &n, "{\"loaded\":%s", s_loaded ? "true" : "false");
+    JN("est_range_km", cl_est_range_km(e), 0);
+    JN("range_wh_km", cl_range_wh_km(e), 0);
+    JN("avg_wh_km_5", cl_avg_wh_km(e, 5), 0);
+    JN("instant_wh_km", cl_instant_wh_km(e), 0);
+    if (e->trip_open)
+    {
+        trip_json(rec, sizeof(rec), &e->trip, e);
+        app(buf, cap, &n, ",\"trip\":%s", rec);
+    }
+    else
+    {
+        app(buf, cap, &n, ",\"trip\":null");
+    }
+    if (e->charge_open)
+    {
+        cl_charge_t c = e->charge;
+        c.kwh = c.kwh_counter >= CL_MIN_CHARGE_KWH ? c.kwh_counter : c.kwh_vi;
+        charge_json(rec, sizeof(rec), &c, e);
+        app(buf, cap, &n, ",\"charge\":%s", rec);
+    }
+    else
+    {
+        app(buf, cap, &n, ",\"charge\":null");
+    }
+    app(buf, cap, &n,
+        ",\"totals\":{\"km\":%.1f,\"kwh\":%.2f,\"charged_kwh\":%.2f,"
+        "\"drives\":%lu,\"charges\":%lu}}",
+        e->total_km, e->total_kwh, e->total_charged_kwh,
+        (unsigned long)e->trips, (unsigned long)e->charges);
+    return n < cap - 1 ? n : 0;
 }
 
 /* newest-first JSON array of the last ?limit= lines of a history file */

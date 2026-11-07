@@ -32,6 +32,8 @@ jobs:
           cd fork_components/cherylink/host_test
           cc -Wall -Wextra -Werror -I../include ../cl_engine.c test_engine.c -lm -o t
           ./t
+          cc -Wall -Wextra -Werror -I../include ../cl_ble_core.c test_ble.c -lm -o tb
+          ./tb
 
       - name: Fetch meatpi-components and apply patches
         run: |

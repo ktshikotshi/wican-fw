@@ -59,10 +59,12 @@ dark mode (web_ui_v2 index.html) and follows its saved theme choice
 | `GET /api/cherylink/drives?limit=N` | finished drives, newest first |
 | `GET /api/cherylink/charges?limit=N` | finished charges, newest first |
 | `GET /api/cherylink/route?start=<epoch>` | a drive's route `[[lat,lon],...]` (the open drive's too) |
+| Bluetooth FFF7/FFF8 | live values + summary + finished drives/charges pushed to the CheryLink app; ABRP handover (phone near = phone sends, phone gone = WiCAN sends over LTE). See [BLE_PROTOCOL.md](BLE_PROTOCOL.md) |
 
 ## Host test
 
 ```
 cd fork_components/cherylink/host_test
 cc -Wall -Wextra -I../include ../cl_engine.c test_engine.c -lm -o t && ./t
+cc -Wall -Wextra -I../include ../cl_ble_core.c test_ble.c -lm -o tb && ./tb
 ```

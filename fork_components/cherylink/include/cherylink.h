@@ -28,6 +28,11 @@ esp_err_t cherylink_start(void);
 /** Sleep/shutdown: closes a trip (a charge stays open) and saves. */
 esp_err_t cherylink_stop(void);
 
+/** Bluetooth channel for the CheryLink app (FFF7/FFF8) + ABRP handover.
+ *  Registers its channel, so it must run BEFORE ble_manager_start(). */
+esp_err_t cherylink_ble_start(void);
+esp_err_t cherylink_ble_stop(void);
+
 /** autopid value sink (poller context: queue push only, never blocks). */
 void cherylink_autopid_sink(const char *name, const char *unit,
                             double value, bool changed);

@@ -1,0 +1,76 @@
+From 6e95398e2364bd3d6e063f136d687f240f544631 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 7 Nov 2026 09:24:17 +0000
+Subject: [PATCH] data_destinations: ABRP hold for a second sender (CheryLink
+ phone over BLE)
+
+---
+ .../data_destinations/data_destinations.c     | 26 +++++++++++++++++++
+ .../include/data_destinations.h               |  7 +++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/components/data_destinations/data_destinations.c b/components/data_destinations/data_destinations.c
+index 968ae7e..b28040f 100644
+--- a/components/data_destinations/data_destinations.c
++++ b/components/data_destinations/data_destinations.c
+@@ -193,6 +193,23 @@ bool dd_state_get(size_t i, dd_state_t *out)
+ 
+ /* ---- the poster --------------------------------------------------------------- */
+ 
++static volatile bool s_abrp_hold;
++
++void data_destinations_set_abrp_hold(bool hold)
++{
++    if (s_abrp_hold != hold)
++    {
++        ESP_LOGI(TAG, "abrp %s", hold ? "held (another sender owns it)"
++                                      : "resumed");
++    }
++    s_abrp_hold = hold;
++}
++
++bool data_destinations_abrp_held(void)
++{
++    return s_abrp_hold;
++}
++
+ static bool link_up(dd_type_t type)
+ {
+     if (type == DD_TYPE_MQTT)
+@@ -218,6 +235,15 @@ static void run_one(size_t i, const dd_dest_t *d, bool forced,
+         return;
+     }
+ 
++    if (!forced && d->type == DD_TYPE_ABRP && s_abrp_hold)
++    {
++        st.next_due_us = now + (int64_t)d->period_s * 1000000;
++        dd_config_lock();
++        s_state[i] = st;
++        dd_config_unlock();
++        return;
++    }
++
+     if (!link_up(d->type))
+     {
+         if (forced && res != NULL)
+diff --git a/components/data_destinations/include/data_destinations.h b/components/data_destinations/include/data_destinations.h
+index 3224542..ce5a880 100644
+--- a/components/data_destinations/include/data_destinations.h
++++ b/components/data_destinations/include/data_destinations.h
+@@ -81,6 +81,13 @@ esp_err_t data_destinations_init(void);
+ /** Start the poster task (idle while disabled / no destinations).
+  *  ESP_ERR_INVALID_STATE when unconfigured (Standard §4.3 step 5). */
+ esp_err_t data_destinations_start(void);
++
++/** Hold the ABRP destinations (fork, 2026-11-07): while held, a due ABRP
++ *  push is skipped as if the link were down (no request, backoff kept
++ *  as is). Another sender (the CheryLink phone app, connected over BLE)
++ *  owns ABRP meanwhile, so ABRP never gets two senders. Any task. */
++void data_destinations_set_abrp_hold(bool hold);
++bool data_destinations_abrp_held(void);
+ esp_err_t data_destinations_stop(void);
+ 
+ /**
+-- 
+2.43.0
+

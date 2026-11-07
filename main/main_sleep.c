@@ -48,6 +48,7 @@ static void on_prepare_sleep(void)
     (void)vpn_manager_stop();
     (void)mdns_manager_stop();
     (void)ble_j2534_stop();
+    (void)cherylink_ble_stop(); /* fork: releases the ABRP hold */
     (void)j2534_server_stop();
     (void)usb_acm_cli_stop();
     /* 2026-10-01: the dongle link task polls the uplink; park it before
