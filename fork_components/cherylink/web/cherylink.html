@@ -266,7 +266,8 @@ function render(){
  $("tripc").hidden=!tr;$("chargec").hidden=!ch;
  if(tr)stats($("trip"),[[f(tr.km,1)+" km","since "+tm(tr.start)],[esc(place(tr.start_lat,tr.start_lon)),"from"],[f(tr.kwh,2)+" kWh","used"],[f(tr.wh_km),"Wh/km"],[f(tr.regen_kwh,2)+" kWh","regen"],[f(tr.soc_start)+" → "+f(soc)+"%","SOC"],[dur(S.now-tr.start),"driving"]]);
  if(ch){$("chargelbl").textContent=(ch.dc?"DC":"AC")+" charging since "+tm(ch.start);
-  stats($("charge"),[[f(-(S.kw||0),1)+" kW","now · peak "+f(ch.peak_kw,1)],[f(ch.kwh,2)+" kWh","into pack"],[f(ch.soc_start)+" → "+f(soc)+"%","SOC"],[ok(V("MIN_TO_FULL"))&&V("MIN_TO_FULL")>0?dur(V("MIN_TO_FULL")*60):"–","to full"],[dur(S.now-ch.start),"charging"]])}
+  const chEst=!(ch.kwh>=0.01)&&ok(ch.soc_start)&&ok(soc)&&soc-ch.soc_start>=0.5,mtf=V("MIN_TO_FULL");
+  stats($("charge"),[[ok(S.kw)?f(-S.kw,1)+" kW":"–",ok(S.kw)?"now · peak "+f(ch.peak_kw,1):"no power reading"],[chEst?"≈"+f((soc-ch.soc_start)/100*(S.pack_kwh||41.278),1)+" kWh":f(ch.kwh,2)+" kWh",chEst?"into pack (from SOC)":"into pack"],[f(ch.soc_start)+" → "+f(soc)+"%","SOC"],[ok(mtf)&&mtf>0&&mtf<1023?dur(mtf*60):"–","to full"],[dur(S.now-ch.start),"charging"]])}
  stats($("live"),[[f(V("SPEED"))+" km/h","speed"],[f(S.instant_wh_km),"Wh/km now"],[{1:"P",2:"R",3:"N",4:"D"}[V("GEAR")]||"–","gear"],[f(V("TMP_A"),1)+" °C","outside"],[f(V("HVAC_KW"),1)+" kW","A/C"],[f(V("ODOMETER"),0)+" km","odometer"],[S.gps&&okLL(S.gps.lat,S.gps.lon)?`<a href="${gmap(S.gps.lat,S.gps.lon)}" target="_blank" rel="noopener">${esc(place(S.gps.lat,S.gps.lon))}</a>`:"–",S.gps&&S.gps.fresh?"location":"last location"]]);
  tripRoute();
  const T=S.totals;$("since").textContent=T.since?new Date(T.since*1000).toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}):"–";
@@ -371,7 +372,7 @@ function renderLists(){
   findHome(C);
   const mo=C.filter(c=>c.start>now-30*86400),kwh=mo.reduce((a,c)=>a+(c.kwh||0),0);
   stats($("month"),[[f(kwh,1)+" kWh",mo.length+" charges"],[mo.filter(c=>c.dc).length+" DC","fast charges"],[f(mo.length?mo.reduce((a,c)=>a+(c.peak_kw||0),0)/mo.length:NaN,1)+" kW","avg peak"]]);
-  $("chargesList").innerHTML=C.length?groupByDay(C,c=>`<div class="tile row"><span class="when">${tm(c.start)}<span class="chip ${c.dc?"dc":"ac"}">${c.dc?"DC":"AC"}</span></span><span class="k">${f(c.kwh,1)}<small> kWh</small></span><span class="d">${dur(c.end-c.start)} · ${f(c.soc_start)} → ${f(c.soc_end)} % · avg ${f(c.avg_kw,1)} kW · peak ${f(c.peak_kw,1)} kW${okLL(c.lat,c.lon)?` · <a href="${gmap(c.lat,c.lon)}" target="_blank" rel="noopener">${esc(place(c.lat,c.lon)==="Home"?"Home":"Public · "+place(c.lat,c.lon))}</a>`:""}</span><span class="socbar"><i style="left:${f(c.soc_start)}%;width:${f(Math.max(1,(c.soc_end||0)-(c.soc_start||0)),1)}%"></i></span></div>`):'<p class="empty">No charges yet.</p>';
+  $("chargesList").innerHTML=C.length?groupByDay(C,c=>`<div class="tile row"><span class="when">${tm(c.start)}<span class="chip ${c.dc?"dc":"ac"}">${c.dc?"DC":"AC"}</span></span><span class="k">${!(c.kwh_vi>=0.05)&&!(c.kwh_counter>=0.05)&&c.kwh>0?"≈":""}${f(c.kwh,1)}<small> kWh</small></span><span class="d">${dur(c.end-c.start)} · ${f(c.soc_start)} → ${f(c.soc_end)} % ${c.peak_kw>0?` · avg ${f(c.avg_kw,1)} kW · peak ${f(c.peak_kw,1)} kW`:" · kWh from SOC (no power reading)"}${okLL(c.lat,c.lon)?` · <a href="${gmap(c.lat,c.lon)}" target="_blank" rel="noopener">${esc(place(c.lat,c.lon)==="Home"?"Home":"Public · "+place(c.lat,c.lon))}</a>`:""}</span><span class="socbar"><i style="left:${f(c.soc_start)}%;width:${f(Math.max(1,(c.soc_end||0)-(c.soc_start||0)),1)}%"></i></span></div>`):'<p class="empty">No charges yet.</p>';
  }
 }
 async function poll(){
